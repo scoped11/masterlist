@@ -18,8 +18,10 @@ int main(int argc, char* argv[])
 
 	if (argc > 1 && strcmp(argv[1], "--offsets") == 0)
 	{
-		printf("=== DMA Offset Dumper (Multi-Game) ===\n");
-		printf("Supported: Unturned (Mono), Rust (IL2CPP), R6 Siege, Apex Legends\n");
+		printf("=== DMA Offset Dumper (Multi-Game, Multi-Engine) ===\n");
+		printf("Engines: Mono, IL2CPP, UE4, UE5, Source 2, Source(Respawn), Enfusion, AnvilNext\n");
+		printf("Games:   Unturned, Rust, Squad, Sea of Thieves, Delta Force, Arena Breakout,\n");
+		printf("         CS2, Apex Legends, Arma Reforger, DayZ, R6 Siege\n");
 		printf("Also auto-detects engine type for unknown games.\n\n");
 		if (!DMA::Init()) { printf("DMA init failed.\n"); _getch(); return 1; }
 		OffsetDump::AutoDump();
