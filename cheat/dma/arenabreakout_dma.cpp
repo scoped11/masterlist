@@ -58,11 +58,17 @@ static fn_VMMDLL_Scatter_CloseHandle    pScatterClose = nullptr;
 static bool LoadVMM() {
     HMODULE h = LoadLibraryA("vmm.dll");
     if (!h) { MessageBoxA(NULL, "vmm.dll not found.\nPlace vmm.dll + leechcore.dll in the same directory.", "DMA Error", MB_ICONERROR); return false; }
-    #define LOAD(name) p##name = (fn_VMMDLL_##name)GetProcAddress(h, "VMMDLL_" #name)
-    LOAD(Initialize); LOAD(Close); LOAD(PidGetFromName); LOAD(MemReadEx);
-    LOAD(ProcessGetModuleBaseU);
-    LOAD(Scatter_Initialize); LOAD(Scatter_Prepare); LOAD(Scatter_Execute);
-    LOAD(Scatter_Read); LOAD(Scatter_CloseHandle);
+    #define LOAD(var, name) var = (decltype(var))GetProcAddress(h, name)
+    LOAD(pInitialize,    "VMMDLL_Initialize");
+    LOAD(pClose,         "VMMDLL_Close");
+    LOAD(pPidGetFromName,"VMMDLL_PidGetFromName");
+    LOAD(pMemReadEx,     "VMMDLL_MemReadEx");
+    LOAD(pGetModuleBase, "VMMDLL_ProcessGetModuleBaseU");
+    LOAD(pScatterInit,   "VMMDLL_Scatter_Initialize");
+    LOAD(pScatterPrep,   "VMMDLL_Scatter_Prepare");
+    LOAD(pScatterExec,   "VMMDLL_Scatter_Execute");
+    LOAD(pScatterRead,   "VMMDLL_Scatter_Read");
+    LOAD(pScatterClose,  "VMMDLL_Scatter_CloseHandle");
     #undef LOAD
     return pInitialize && pMemReadEx;
 }
