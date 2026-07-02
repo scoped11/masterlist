@@ -2364,8 +2364,24 @@ namespace OffsetDump
 	// ============================================================
 	// AnvilNext 2.0 sig scanner (Rainbow Six Siege)
 	// ============================================================
+	struct DiscoveredOffsets {
+		uint32_t entityList;
+		uint32_t entityCount;
+		uint32_t entityStride;
+		int      entityCountVal;
+		bool     valid;
+	};
+
+	struct EntityFieldMap {
+		uint32_t position;   // Vec3 world position
+		uint32_t health;     // float or int health value
+		uint32_t team;       // int team ID
+		bool     valid;
+	};
+
 	struct R6ScanResult {
 		DWORD64 gameManagerPtr;
+		DWORD64 sigFoundPtr;       // preserved sig-scan address (brute-force may overwrite gameManagerPtr)
 		DWORD64 statusManagerPtr;
 		DWORD64 cameraManagerPtr;
 		DWORD64 profileManagerPtr;
@@ -2373,9 +2389,12 @@ namespace OffsetDump
 		DWORD64 roundManagerPtr;
 		DWORD64 glowManagerPtr;
 		DWORD64 gameRendererPtr;
-		DWORD64 decryptedGameManager; // actual heap address after decryption
-		int gmRotation; // ROL rotation used, 0 = plaintext
+		DWORD64 decryptedGameManager;
+		DWORD64 xorKey;
+		int gmRotation;
 		bool found;
+		DiscoveredOffsets discovered;
+		EntityFieldMap entityFields;
 	};
 
 	inline R6ScanResult ScanR6Signatures(DWORD64 modBase)
@@ -2426,6 +2445,7 @@ namespace OffsetDump
 				if (val > 0x10000 && val < 0x7FFFFFFFFFFF)
 				{
 					r.gameManagerPtr = resolved;
+					r.sigFoundPtr = resolved;
 					Log("[+] GameManager ptr @ 0x%llX (sig #%d, value=0x%llX)", resolved, i, val);
 					r.found = true;
 					break;
@@ -2645,6 +2665,331 @@ namespace OffsetDump
 		}
 
 		// ============================================================
+		// Xref analysis: find decryption routine in .text
+		// Scan for all code sites that load the encrypted GM pointer,
+		// then read surrounding instructions to extract XOR key + rotation
+		// ============================================================
+		if (!gmChainValid && gmEncryptedAddr)
+		{
+			Log("[*] Scanning .text for xrefs to encrypted GameManager @ 0x%llX...", gmEncryptedAddr);
+			DWORD64 gmVal = read<DWORD64>(gmEncryptedAddr);
+			int xrefCount = 0;
+
+			const DWORD xchunk = 0x1000000; // 16MB
+			for (DWORD xoff = 0; xoff < textSize - 7 && !gmChainValid; xoff += xchunk)
+			{
+				DWORD xread = (xoff + xchunk + 256 < textSize) ? xchunk + 256 : textSize - xoff;
+				std::vector<BYTE> xbuf(xread);
+				read_buffer(textBase + xoff, xbuf.data(), xread);
+
+				for (DWORD xi = 0; xi + 7 <= xread && !gmChainValid; xi++)
+				{
+					// REX.W MOV reg, [rip+disp32]: 48 8B modrm disp32
+					if (xbuf[xi] != 0x48 || xbuf[xi+1] != 0x8B) continue;
+					BYTE modrm = xbuf[xi+2];
+					if ((modrm & 0xC7) != 0x05) continue;
+
+					int32_t disp = *(int32_t*)(&xbuf[xi+3]);
+					DWORD64 instrAddr = textBase + xoff + xi;
+					DWORD64 target = instrAddr + 7 + disp;
+					if (target != gmEncryptedAddr) continue;
+
+					xrefCount++;
+					int dstReg = (modrm >> 3) & 7;
+					if (xrefCount > 20) break;
+
+					// Read 192 bytes from this instruction onward (from live process)
+					BYTE code[192] = {};
+					read_buffer(instrAddr, code, 192);
+
+					// Hex dump for diagnostics
+					char hexLine[512];
+					for (int hb = 0; hb < 48 && hb < 192; hb++)
+						sprintf_s(hexLine + hb*3, 4, "%02X ", code[hb]);
+					Log("[+] Xref #%d @ 0x%llX (reg=%d): %s",
+						xrefCount, instrAddr, dstReg, hexLine);
+
+					// Search for XOR and ROL/ROR in the next 128 bytes
+					DWORD64 extractedKey = 0;
+					int extractedRot = 0;
+					bool xorFound = false, rotFound = false;
+					bool xorBeforeRot = true;
+
+					for (int bi = 7; bi < 160; bi++)
+					{
+						// MOV reg, imm64: 48 B8+rd kk*8 (loads XOR key into register)
+						if (!xorFound && code[bi] == 0x48 && code[bi+1] >= 0xB8 && code[bi+1] <= 0xBF && bi + 10 <= 192)
+						{
+							extractedKey = *(DWORD64*)(&code[bi+2]);
+							if (extractedKey > 0xFF && extractedKey != 0)
+							{
+								xorFound = true;
+								Log("[*]   MOV r%d, 0x%llX at +%d", code[bi+1] - 0xB8, extractedKey, bi);
+							}
+						}
+
+						// XOR reg, [rip+disp32]: 48 33 05 dd*4
+						if (!xorFound && code[bi] == 0x48 && code[bi+1] == 0x33 &&
+							(code[bi+2] & 0xC7) == 0x05 && bi + 7 <= 192)
+						{
+							int32_t kd = *(int32_t*)(&code[bi+3]);
+							DWORD64 keyAddr = instrAddr + bi + 7 + kd;
+							extractedKey = read<DWORD64>(keyAddr);
+							xorFound = true;
+							Log("[*]   XOR reg, [0x%llX] -> key=0x%llX at +%d", keyAddr, extractedKey, bi);
+						}
+
+						// XOR reg, imm32: 48 35 ii*4 (only for RAX) or 48 81 F0+reg ii*4
+						if (!xorFound && code[bi] == 0x48 && code[bi+1] == 0x35 && bi + 6 <= 192)
+						{
+							extractedKey = (DWORD64)(int64_t)(*(int32_t*)(&code[bi+2]));
+							xorFound = true;
+							Log("[*]   XOR RAX, 0x%llX at +%d", extractedKey, bi);
+						}
+
+						// XOR reg, reg: 48 33 C0-FF or 48 31 C0-FF
+						// We already have the key from MOV if xorFound is set from the MOV pattern
+						if (!xorFound && code[bi] == 0x48 &&
+							(code[bi+1] == 0x33 || code[bi+1] == 0x31) &&
+							code[bi+2] >= 0xC0 && code[bi+2] <= 0xFF)
+						{
+							// reg-reg XOR — we need the MOV that loaded the key
+							// If we haven't found the MOV yet, skip and look backwards
+							Log("[*]   XOR reg,reg (%02X %02X %02X) at +%d (key not yet extracted)",
+								code[bi], code[bi+1], code[bi+2], bi);
+						}
+
+						// ROL reg, imm8: 48 C1 C0+reg imm8
+						if (!rotFound && code[bi] == 0x48 && code[bi+1] == 0xC1 && bi + 4 <= 192)
+						{
+							BYTE rm = code[bi+2];
+							if (rm >= 0xC0 && rm <= 0xC7)
+							{
+								extractedRot = code[bi+3];
+								rotFound = true;
+								Log("[*]   ROL r%d, %d at +%d", rm - 0xC0, extractedRot, bi);
+							}
+							else if (rm >= 0xC8 && rm <= 0xCF)
+							{
+								extractedRot = -(int)code[bi+3]; // negative = ROR
+								rotFound = true;
+								Log("[*]   ROR r%d, %d at +%d", rm - 0xC8, code[bi+3], bi);
+							}
+						}
+
+						if (xorFound && rotFound) break;
+					}
+
+					// Try all valid orderings of XOR and ROL/ROR
+					if (xorFound)
+					{
+						DWORD64 candidates[4] = {};
+						int ncand = 0;
+						int absRot = extractedRot < 0 ? -extractedRot : extractedRot;
+
+						if (rotFound)
+						{
+							// XOR then ROL: dec = ROL(enc ^ key, rot)
+							if (extractedRot > 0)
+								candidates[ncand++] = _rotl64(gmVal ^ extractedKey, absRot);
+							else
+								candidates[ncand++] = _rotr64(gmVal ^ extractedKey, absRot);
+							// ROL then XOR: dec = (ROL(enc, rot)) ^ key
+							if (extractedRot > 0)
+								candidates[ncand++] = _rotl64(gmVal, absRot) ^ extractedKey;
+							else
+								candidates[ncand++] = _rotr64(gmVal, absRot) ^ extractedKey;
+							// Inverse: unROL then XOR
+							if (extractedRot > 0)
+								candidates[ncand++] = _rotr64(gmVal, absRot) ^ extractedKey;
+							else
+								candidates[ncand++] = _rotl64(gmVal, absRot) ^ extractedKey;
+							// XOR then inverse rotate
+							if (extractedRot > 0)
+								candidates[ncand++] = _rotr64(gmVal ^ extractedKey, absRot);
+							else
+								candidates[ncand++] = _rotl64(gmVal ^ extractedKey, absRot);
+						}
+						else
+						{
+							// No rotation found, try plain XOR
+							candidates[ncand++] = gmVal ^ extractedKey;
+							// Also try all rotations 1-63 with this key
+							for (int tr = 1; tr <= 63 && !gmChainValid; tr++)
+							{
+								DWORD64 d1 = _rotl64(gmVal ^ extractedKey, tr);
+								DWORD64 d2 = _rotr64(gmVal ^ extractedKey, tr);
+								DWORD64 d3 = _rotl64(gmVal, tr) ^ extractedKey;
+								DWORD64 d4 = _rotr64(gmVal, tr) ^ extractedKey;
+								DWORD64 tries[] = {d1, d2, d3, d4};
+								for (auto d : tries)
+								{
+									if (d < 0x10000 || d > 0x7FFFFFFFFFFF) continue;
+									DWORD64 el = read<DWORD64>(d + 0x1C8);
+									if (el < 0x10000 || el > 0x7FF000000000) continue;
+									int32_t ec = read<int32_t>(d + 0x1D0);
+									if (ec <= 0 || ec > 100) continue;
+									r.decryptedGameManager = d;
+									r.xorKey = extractedKey;
+									r.gmRotation = tr;
+									gmChainValid = true;
+									Log("[+] DECRYPTED GM (XOR=0x%llX ROT=%d): 0x%llX -> 0x%llX (%d ents)",
+										extractedKey, tr, gmVal, d, ec);
+									break;
+								}
+							}
+						}
+
+						for (int ci = 0; ci < ncand && !gmChainValid; ci++)
+						{
+							DWORD64 dec = candidates[ci];
+							if (dec < 0x10000 || dec > 0x7FFFFFFFFFFF) continue;
+							DWORD64 el = read<DWORD64>(dec + 0x1C8);
+							if (el < 0x10000 || el > 0x7FF000000000) continue;
+							int32_t ec = read<int32_t>(dec + 0x1D0);
+							if (ec <= 0 || ec > 100) continue;
+							DWORD64 ent0 = read<DWORD64>(el);
+							if (ent0 < 0x10000 || ent0 > 0x7FF000000000) continue;
+							r.decryptedGameManager = dec;
+							r.xorKey = extractedKey;
+							r.gmRotation = extractedRot;
+							gmChainValid = true;
+							Log("[+] DECRYPTED GM (XOR=0x%llX ROT=%d): 0x%llX -> 0x%llX (%d ents)",
+								extractedKey, extractedRot, gmVal, dec, ec);
+						}
+					}
+				}
+			}
+			Log("[*] Scanned %d xrefs to encrypted GameManager", xrefCount);
+		}
+
+		// ============================================================
+		// Dynamic structure probing: for any candidate GM pointer,
+		// find the real entity list offset by scanning all offsets
+		// ============================================================
+		auto probeEntityList = [](DWORD64 gmPtr) -> DiscoveredOffsets {
+			DiscoveredOffsets d = {};
+			int bestCount = 0;
+
+			for (uint32_t off = 0; off < 0x500; off += 8)
+			{
+				DWORD64 ptr = read<DWORD64>(gmPtr + off);
+				if (ptr < 0x10000 || ptr > 0x7FF000000000) continue;
+
+				// Check nearby int32 for count (at off+8, off-8, off+16)
+				uint32_t countOffsets[] = { off + 8, off - 8, off + 16, off + 4 };
+				for (auto coff : countOffsets)
+				{
+					if (coff >= 0x500) continue;
+					int32_t cnt = read<int32_t>(gmPtr + coff);
+					if (cnt < 1 || cnt > 50) continue;
+
+					int validPtrs = 0;
+					for (int e = 0; e < min(cnt, 15); e++)
+					{
+						DWORD64 ent = read<DWORD64>(ptr + e * 8);
+						if (ent > 0x10000 && ent < 0x7FF000000000) validPtrs++;
+					}
+
+					if (validPtrs >= 1 && validPtrs > bestCount)
+					{
+						bestCount = validPtrs;
+						d.entityList = off;
+						d.entityCount = coff;
+						d.entityStride = 8;
+						d.entityCountVal = cnt;
+						d.valid = true;
+					}
+				}
+			}
+			return d;
+		};
+
+		auto probeEntityFields = [](DWORD64 gmPtr, const DiscoveredOffsets& d) -> EntityFieldMap {
+			EntityFieldMap fm = {};
+			if (!d.valid) return fm;
+
+			DWORD64 listPtr = read<DWORD64>(gmPtr + d.entityList);
+			if (!listPtr) return fm;
+
+			// Read first 3 valid entities
+			DWORD64 ents[3] = {};
+			int ne = 0;
+			for (int i = 0; i < d.entityCountVal && ne < 3; i++)
+			{
+				DWORD64 e = read<DWORD64>(listPtr + i * d.entityStride);
+				if (e > 0x10000 && e < 0x7FF000000000) ents[ne++] = e;
+			}
+			if (ne < 1) return fm;
+
+			// Probe for position: look for 3 consecutive floats in plausible world-coordinate range
+			for (uint32_t off = 0; off < 0x900; off += 4)
+			{
+				int posHits = 0;
+				for (int ei = 0; ei < ne; ei++)
+				{
+					float x = read<float>(ents[ei] + off);
+					float y = read<float>(ents[ei] + off + 4);
+					float z = read<float>(ents[ei] + off + 8);
+					if (x != x || y != y || z != z) continue; // NaN
+					if (x == 0.0f && y == 0.0f && z == 0.0f) continue;
+					if (fabsf(x) > 100000 || fabsf(y) > 100000 || fabsf(z) > 100000) continue;
+					if (fabsf(x) > 0.01f || fabsf(y) > 0.01f || fabsf(z) > 0.01f)
+						posHits++;
+				}
+				if (posHits >= ne && posHits >= 1 && !fm.position)
+				{
+					fm.position = off;
+					fm.valid = true;
+					break; // take first valid position offset
+				}
+			}
+
+			// Probe for health: look for float ~100 or int ~100 at consistent offsets
+			// Health is typically accessed through component chain pointers,
+			// so also check pointer->offset patterns
+			for (uint32_t off = 0; off < 0x300; off += 4)
+			{
+				int healthHits = 0;
+				for (int ei = 0; ei < ne; ei++)
+				{
+					float fv = read<float>(ents[ei] + off);
+					if (fv >= 1.0f && fv <= 120.0f) healthHits++;
+				}
+				if (healthHits == ne && ne >= 2)
+				{
+					fm.health = off;
+					break;
+				}
+			}
+
+			// Probe for team: int in range 0-10 at consistent offset
+			for (uint32_t off = 0; off < 0x300; off += 4)
+			{
+				int teamHits = 0;
+				bool sameTeam = true;
+				int firstTeam = -1;
+				for (int ei = 0; ei < ne; ei++)
+				{
+					int32_t tv = read<int32_t>(ents[ei] + off);
+					if (tv >= 0 && tv <= 10) {
+						teamHits++;
+						if (firstTeam < 0) firstTeam = tv;
+						else if (tv != firstTeam) sameTeam = false;
+					}
+				}
+				// Team values should be valid for all entities, not all same (different teams exist)
+				if (teamHits == ne && ne >= 2 && !sameTeam)
+				{
+					fm.team = off;
+					break;
+				}
+			}
+
+			return fm;
+		};
+
+		// ============================================================
 		// Brute-force: if no valid GameManager chain, scan ALL RIP-relative
 		// MOV instructions and validate entity chain (try plaintext + ROL)
 		// ============================================================
@@ -2747,6 +3092,145 @@ namespace OffsetDump
 					(DWORD64)testedPtrs.size());
 		}
 
+		// ============================================================
+		// Dynamic structure probing on any candidate GM
+		// ============================================================
+		auto doProbe = [&](DWORD64 ptr, const char* label) {
+			Log("[*] Probing %s structure at 0x%llX...", label, ptr);
+			DiscoveredOffsets d = probeEntityList(ptr);
+			if (d.valid)
+			{
+				Log("[+] DISCOVERED entity list: %s+0x%X (count @ +0x%X = %d, stride=%d)",
+					label, d.entityList, d.entityCount, d.entityCountVal, d.entityStride);
+
+				EntityFieldMap fm = probeEntityFields(ptr, d);
+				if (fm.valid)
+				{
+					Log("[+]   entity position=+0x%X", fm.position);
+					if (fm.health) Log("[+]   entity health=+0x%X", fm.health);
+					if (fm.team)   Log("[+]   entity team=+0x%X", fm.team);
+				}
+
+				DWORD64 listPtr = read<DWORD64>(ptr + d.entityList);
+				for (int ei = 0; ei < min(d.entityCountVal, 8); ei++)
+				{
+					DWORD64 ent = read<DWORD64>(listPtr + ei * d.entityStride);
+					if (ent < 0x10000) continue;
+					DWORD64 vtbl = read<DWORD64>(ent);
+					float px = 0, py = 0, pz = 0;
+					if (fm.position)
+					{
+						px = read<float>(ent + fm.position);
+						py = read<float>(ent + fm.position + 4);
+						pz = read<float>(ent + fm.position + 8);
+					}
+					Log("[*]   Entity[%d] @ 0x%llX  vtable=0x%llX  pos=(%.2f, %.2f, %.2f)", ei, ent, vtbl, px, py, pz);
+				}
+
+				if (!r.discovered.valid || d.entityCountVal > r.discovered.entityCountVal)
+				{
+					r.discovered = d;
+					r.entityFields = fm;
+				}
+			}
+		};
+
+		auto hexDump = [](DWORD64 addr, uint32_t len, const char* label) {
+			Log("[*] HexDump of %s @ 0x%llX (%u bytes):", label, addr, len);
+			BYTE buf[0x200] = {};
+			read_buffer(addr, buf, len);
+			for (uint32_t row = 0; row < len; row += 0x20)
+			{
+				char line[256] = {};
+				int pos = sprintf_s(line, "  +0x%03X: ", row);
+				for (uint32_t col = 0; col < 0x20 && (row + col) < len; col += 8)
+				{
+					DWORD64 qw = *(DWORD64*)(buf + row + col);
+					pos += sprintf_s(line + pos, sizeof(line) - pos, "%016llX ", qw);
+				}
+				Log("%s", line);
+			}
+		};
+
+		// Probe the direct candidate GM
+		if (r.decryptedGameManager)
+		{
+			hexDump(r.decryptedGameManager, 0x200, "BruteForce-GM");
+			doProbe(r.decryptedGameManager, "GameManager(direct)");
+		}
+
+		// Probe the sig-found pointer (use sigFoundPtr — NOT gameManagerPtr which brute-force may have overwritten)
+		DWORD64 sigAddr = r.sigFoundPtr;
+		if (sigAddr)
+		{
+			DWORD64 sigVal = read<DWORD64>(sigAddr);
+			Log("[*] SigFoundPtr @ 0x%llX -> value 0x%llX (bruteForce GM = 0x%llX, same=%s)",
+				sigAddr, sigVal, r.decryptedGameManager, sigVal == r.decryptedGameManager ? "YES" : "NO");
+
+			if (sigVal > 0x10000 && sigVal < 0x7FFFFFFFFFFF)
+			{
+				if (sigVal != r.decryptedGameManager)
+				{
+					hexDump(sigVal, 0x200, "SigPointer-Value");
+					doProbe(sigVal, "SigPointer(raw)");
+				}
+
+				// Xrefs show code accesses [ptr+0x70] — probe inner pointers
+				Log("[*] Probing inner pointers from SigPtr value 0x%llX:", sigVal);
+				uint32_t innerOffsets[] = { 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40, 0x48, 0x50,
+				                            0x58, 0x60, 0x68, 0x70, 0x78, 0x80, 0x88, 0x90, 0x98, 0xA0,
+				                            0xA8, 0xB0, 0xB8, 0xC0, 0xC8, 0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8 };
+				for (auto ioff : innerOffsets)
+				{
+					DWORD64 inner = read<DWORD64>(sigVal + ioff);
+					if (inner > 0x10000 && inner < 0x7FF000000000)
+					{
+						Log("[*]   SigPtr+0x%X -> 0x%llX", ioff, inner);
+						char lbl[64];
+						sprintf_s(lbl, "SigPtr->+0x%X", ioff);
+						doProbe(inner, lbl);
+
+						// 2nd level: probe inner's inner pointers
+						for (uint32_t i2 = 0; i2 < 0x200; i2 += 8)
+						{
+							DWORD64 inner2 = read<DWORD64>(inner + i2);
+							if (inner2 > 0x10000 && inner2 < 0x7FF000000000 && inner2 != inner && inner2 != sigVal)
+							{
+								DiscoveredOffsets d2 = probeEntityList(inner2);
+								if (d2.valid)
+								{
+									sprintf_s(lbl, "SigPtr->+0x%X->+0x%X", ioff, i2);
+									doProbe(inner2, lbl);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		else if (r.decryptedGameManager)
+		{
+			// No sig scan found anything, but brute-force worked — probe deeper into brute-force GM
+			Log("[*] No sig pointer found, probing brute-force GM inner pointers:");
+			for (uint32_t ioff = 0x08; ioff <= 0x1F8; ioff += 8)
+			{
+				DWORD64 inner = read<DWORD64>(r.decryptedGameManager + ioff);
+				if (inner > 0x10000 && inner < 0x7FF000000000)
+				{
+					DiscoveredOffsets d2 = probeEntityList(inner);
+					if (d2.valid)
+					{
+						char lbl[64];
+						sprintf_s(lbl, "GM->+0x%X", ioff);
+						doProbe(inner, lbl);
+					}
+				}
+			}
+		}
+
+		if (!r.discovered.valid)
+			Log("[!] No entity list discovered at any probed level");
+
 		return r;
 	}
 
@@ -2812,29 +3296,42 @@ namespace OffsetDump
 
 		if (scan.decryptedGameManager)
 		{
-			fprintf(f, "\n    // Decrypted GameManager: 0x%llX (ROL %d)\n",
-				scan.decryptedGameManager, scan.gmRotation);
+			fprintf(f, "\n    // Decrypted GameManager: 0x%llX", scan.decryptedGameManager);
+			if (scan.xorKey) fprintf(f, " (XOR=0x%llX ROT=%d)", scan.xorKey, scan.gmRotation);
+			else if (scan.gmRotation) fprintf(f, " (ROL %d)", scan.gmRotation);
+			fprintf(f, "\n");
 		}
 		fprintf(f, "}\n\n");
 
-		// Known AnvilNext 2.0 structure offsets (from public RE sources)
+		// Structure offsets — use dynamic discovery when available
+		uint32_t entListOff  = scan.discovered.valid ? scan.discovered.entityList  : 0x1C8;
+		uint32_t entCountOff = scan.discovered.valid ? scan.discovered.entityCount : 0x1D0;
+		uint32_t posOff      = scan.entityFields.position ? scan.entityFields.position : 0x6A0;
+		const char* offSource = scan.discovered.valid ? "DYNAMIC DISCOVERY" : "public RE (may be stale)";
+
 		fprintf(f, "// ============================================\n");
 		fprintf(f, "// AnvilNext 2.0 Structure Offsets\n");
-		fprintf(f, "// These are RELATIVE offsets within structures.\n");
-		fprintf(f, "// More stable across patches than static ptrs.\n");
+		fprintf(f, "// Source: %s\n", offSource);
 		fprintf(f, "// ============================================\n\n");
 
 		fprintf(f, "namespace R6_GameManager {\n");
-		fprintf(f, "    constexpr uintptr_t EntityList  = 0x1C8;\n");
-		fprintf(f, "    constexpr uintptr_t EntityCount = 0x1D0;\n");
+		fprintf(f, "    constexpr uintptr_t EntityList  = 0x%X;%s\n", entListOff,
+			scan.discovered.valid ? "  // DISCOVERED" : "");
+		fprintf(f, "    constexpr uintptr_t EntityCount = 0x%X;%s\n", entCountOff,
+			scan.discovered.valid ? "  // DISCOVERED" : "");
 		fprintf(f, "}\n\n");
 
 		fprintf(f, "namespace R6_Entity {\n");
 		fprintf(f, "    constexpr uintptr_t Pawn              = 0x20;\n");
 		fprintf(f, "    constexpr uintptr_t Replication       = 0xC8;\n");
 		fprintf(f, "    constexpr uintptr_t ComponentChain    = 0xD8;\n");
-		fprintf(f, "    constexpr uintptr_t HeadPosition      = 0x6A0;  // Vec3\n");
+		fprintf(f, "    constexpr uintptr_t HeadPosition      = 0x%X;  // Vec3%s\n",
+			posOff, scan.entityFields.position ? " DISCOVERED" : "");
 		fprintf(f, "    constexpr uintptr_t FeetPosition      = 0x700;  // Vec3\n");
+		if (scan.entityFields.health)
+			fprintf(f, "    constexpr uintptr_t DirectHealth      = 0x%X;  // DISCOVERED\n", scan.entityFields.health);
+		if (scan.entityFields.team)
+			fprintf(f, "    constexpr uintptr_t DirectTeam        = 0x%X;  // DISCOVERED\n", scan.entityFields.team);
 		fprintf(f, "}\n\n");
 
 		fprintf(f, "namespace R6_Replication {\n");
@@ -2916,8 +3413,8 @@ namespace OffsetDump
 
 			if (gmVal > 0x10000 && gmVal < 0x7FFFFFFFFFFF)
 			{
-				DWORD64 entityList = read<DWORD64>(gmVal + 0x1C8);
-				DWORD32 entityCount = read<DWORD32>(gmVal + 0x1D0);
+				DWORD64 entityList = read<DWORD64>(gmVal + entListOff);
+				DWORD32 entityCount = read<DWORD32>(gmVal + entCountOff);
 				fprintf(f, "// EntityList ptr: 0x%llX\n", entityList);
 				fprintf(f, "// EntityCount: %u\n", entityCount);
 
@@ -2931,9 +3428,9 @@ namespace OffsetDump
 						DWORD64 entity = read<DWORD64>(entityList + i * 0x8);
 						if (!entity) continue;
 
-						float headX = read<float>(entity + 0x6A0);
-						float headY = read<float>(entity + 0x6A4);
-						float headZ = read<float>(entity + 0x6A8);
+						float headX = read<float>(entity + posOff);
+						float headY = read<float>(entity + posOff + 4);
+						float headZ = read<float>(entity + posOff + 8);
 
 						DWORD64 repl = read<DWORD64>(entity + 0xC8);
 						int teamId = repl ? read<int>(repl + 0x190) : -1;
@@ -2995,16 +3492,26 @@ namespace OffsetDump
 				fprintf(ini, "GameManagerRotation=%d\n\n", scan.gmRotation);
 			}
 
+			if (scan.xorKey)
+			{
+				fprintf(ini, "XorKey=0x%llX\n", scan.xorKey);
+			}
+
 			fprintf(ini, "[GameManager]\n");
-			fprintf(ini, "EntityList=0x1C8\n");
-			fprintf(ini, "EntityCount=0x1D0\n\n");
+			fprintf(ini, "EntityList=0x%X\n", entListOff);
+			fprintf(ini, "EntityCount=0x%X\n\n", entCountOff);
 
 			fprintf(ini, "[Entity]\n");
 			fprintf(ini, "Pawn=0x20\n");
 			fprintf(ini, "Replication=0xC8\n");
 			fprintf(ini, "ComponentChain=0xD8\n");
-			fprintf(ini, "HeadPosition=0x6A0\n");
-			fprintf(ini, "FeetPosition=0x700\n\n");
+			fprintf(ini, "HeadPosition=0x%X\n", posOff);
+			fprintf(ini, "FeetPosition=0x700\n");
+			if (scan.entityFields.health)
+				fprintf(ini, "DirectHealth=0x%X\n", scan.entityFields.health);
+			if (scan.entityFields.team)
+				fprintf(ini, "DirectTeam=0x%X\n", scan.entityFields.team);
+			fprintf(ini, "\n");
 
 			fprintf(ini, "[Replication]\n");
 			fprintf(ini, "TeamID=0x190\n\n");
