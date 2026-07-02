@@ -1,83 +1,158 @@
-# Coopyy DLL - Unturned Internal Cheat
+# Masterlist
 
-An internal DLL cheat for Unturned built on Mono runtime reflection. Injected via `CreateRemoteThread` + `LoadLibraryA`.
+Index of every artifact across the project: mappers, drivers, BYOVD primitives, cheats, DMA tools, build scripts, and shared headers.
 
-## Features
+## Mapper Pipeline
 
-| Feature | Hotkey | Description |
-|---------|--------|-------------|
-| Aimbot | F1 | Locks aim to nearest player in FOV |
-| Silent Aim | F2 | Server-side aim correction |
-| ESP | F3 | Player boxes, names, distance, health bars |
-| No Recoil | F4 | Zeroes weapon recoil values |
-| No Spread | F5 | Zeroes weapon spread angles |
-| Rapid Fire | F6 | Maxes weapon fire rate |
-| Infinite Range | F7 | Sets weapon range to 9999 |
-| God Mode | F8 | Full health/food/water/stamina/immunity |
-| Speed Hack | F9 | Adjustable movement speed multiplier |
-| Fly Hack | F10 | Free-fly movement (on foot) |
-| Super Jump | F11 | Increased jump multiplier |
-| Admin Mode | F12 | Enables admin flag on SteamPlayer |
-| Vehicle Fly | V | Fly while in a vehicle (WASD + Space/Ctrl) |
-| No Fall Damage | N | Zeroes fall damage multiplier |
-| Extended Melee | M | Extends melee weapon range |
-| No Scope Sway | B | Removes scope sway |
-| Spin Bot | J | Spins player yaw |
-| Triggerbot | T | Auto-fires when crosshair is on target |
-| Radar | G | Mini-map showing nearby players |
-| Item ESP | I | Shows nearby item pickups |
-| Zombie ESP | Z | Shows nearby zombies |
-| Vehicle ESP | K | Shows nearby vehicles with health/fuel |
-| Fullbright | L | Forces daytime lighting + max ambient |
-| FOV Changer | O | Custom field of view |
-| Instant Reload | P | Skips reload animation |
-| Stream Proof | Y | Hides overlay from screen capture |
-| Chams | X | Wallhack - see players/zombies through walls |
-| **Speed +/-** | +/- | Adjust speed multiplier |
-| **Eject** | END | Unloads the DLL cleanly |
+| File | Description |
+|------|-------------|
+| `mapper/main_nal.cpp` | Entry point — CLI arg parsing, driver selection (`--driver nal\|trixx\|corsair\|siv\|ts\|rtcore`), BYOVD load/unload |
+| `mapper/mapper.hpp` | Core manual-map engine — PE parsing, section copy, relocation, IAT resolution, TLS callbacks |
+| `mapper/mapper.cpp` | Mapper implementation |
+| `mapper/primitive_nal.hpp` | NalDrv (Intel) BYOVD backend — phys R/W via IOCTL, PML4 walk, virtual R/W |
+| `mapper/primitive_trixx.hpp` | TRIXX (Sapphire GPU util) BYOVD backend — MSR/phys R/W via DeviceIoControl |
+| `mapper/primitive_corsair.hpp` | CorsairLLAccess64 BYOVD backend |
+| `mapper/primitive_siv.hpp` | SIVX64 BYOVD backend |
+| `mapper/primitive_ts.hpp` | ThrottleStop BYOVD backend |
+| `mapper/primitive_rtcore.hpp` | RTCore64 (MSI Afterburner) BYOVD backend |
+| `mapper/loader_auth.hpp` | Loader authentication stub |
+| `mapper/loader_security.hpp` | Loader security/anti-tamper |
 
-## Architecture
+## Driver
 
-```
-coopyy_dll/
-  dllmain.cpp           - Entry point, main loop, cleanup
-  external/
-    mem.h / mem.cpp      - Memory read/write with SEH protection
-    mono.h               - Mono runtime reflection (classes, fields, vtables)
-    unturned.h / .cpp    - Game class and offset resolution
-    features.h           - All cheat feature logic
-    config.h             - Hotkeys, settings, menu display
-    overlay.h            - GDI overlay window (ESP rendering)
-    chams.h              - Mono runtime invoke (chams, vehicle fly, fullbright)
-    log.h                - Console logging
-    math.h               - Angle calculations, distance, world-to-screen
-    types/
-      transform.h        - vector3, vector4, matrix4x4
-      unity.h / .cpp     - Unity GameObject, Transform, Array<T>
-      game.h / .cpp       - Unturned game classes (Player, Zombie, Vehicle, etc.)
-```
+| File | Description |
+|------|-------------|
+| `driver/BetestDriver.c` | Kernel driver source — hooks, callbacks, memory access primitives |
+| `driver/embedded_data.h` | Embedded driver binary (byte array) |
+| `driver/loader.cpp` | Service-based driver loader — `CreateService` + `StartService` |
 
-## How It Works
+## Cheats
 
-1. **DllMain** creates a worker thread via `CreateThread`
-2. Worker thread resolves `mono-2.0-bdwgc.dll` base address
-3. Mono reflection finds all game classes and field offsets dynamically
-4. `mono_thread_attach` registers the worker thread with the Mono runtime
-5. `Chams::Init` resolves Unity engine methods via `mono_runtime_invoke`
-6. Main loop runs at ~200Hz: reads game state, applies cheats, updates overlay
-7. GDI overlay renders ESP on a transparent always-on-top window
-8. Press END to eject - restores original values and unloads cleanly
+### DMA Cheats (FPGA PCIe — MemProcFS/VMM)
 
-## Building
+| File | Description |
+|------|-------------|
+| `DMA/source/r6_dma.cpp` | Rainbow Six Siege — AnvilNext 2.0, encrypted pointers, map-based radar with floor tabs, localhost-only admin panel |
+| `DMA/source/deltaforce_dma.cpp` | Delta Force — UE5, GWorld/ULevel/AActor chain |
+| `DMA/source/arenabreakout_dma.cpp` | Arena Breakout Infinite — UE5, GWorld chain |
+| `DMA/source/dma_radar.cpp` | Universal DMA radar — engine-agnostic, config-driven |
+| `DMA/r6_dma.exe` | Built R6 Siege DMA binary |
+| `DMA/r6_launch.bat` | R6 DMA launch script |
+| `DMA/CoopyyDMA.exe` | Built Unturned DMA binary |
+| `DMA/dma_main.cpp` | Unturned DMA main |
+| `DMA/dma_features.h` | Unturned DMA feature implementations |
+| `DMA/dma_mem.h` | DMA memory read/write (MemProcFS wrapper) |
+| `DMA/dma_config.h` | DMA configuration |
+| `DMA/dma_dumper.h` | DMA-based offset dumper |
+| `DMA/dma_webserver.h` | Embedded HTTP server for radar |
+| `DMA/dma_webui.h` | Radar web UI HTML/JS |
+| `DMA/dma_overlay.h` | GDI overlay for ESP |
+| `DMA/dma_offsetdump.h` | Offset dump definitions |
+| `DMA/esp_client.cpp` | Standalone ESP overlay client |
+| `DMA/stealth_menu.cpp` | Stealth menu for DMA config |
 
-1. Open `coopyy_dll.sln` in Visual Studio 2022
-2. Set configuration to **x64** (Debug or Release)
-3. Build - output is `coopyy_dll.dll`
-4. Place next to `injector.exe` and run the injector
+### DMA Offset Configs
 
-## Requirements
+| File | Game | Engine |
+|------|------|--------|
+| `DMA/offsets/r6_offsets.ini` | Rainbow Six Siege | AnvilNext 2.0 (Custom) |
+| `cheat/dma/apex_offsets.ini` | Apex Legends | Source 2 |
+| `cheat/dma/df_offsets.ini` | Delta Force | UE5 |
+| `cheat/dma/abi_offsets.ini` | Arena Breakout Infinite | UE5 |
+| `cheat/dma/rust_offsets.ini` | Rust | Unity/IL2CPP |
+| `cheat/dma/tarkov_offsets.ini` | Escape from Tarkov | Unity/IL2CPP |
+| `cheat/dma/cs2_offsets.ini` | Counter-Strike 2 | Source 2 |
+| `cheat/dma/pubg_offsets.ini` | PUBG | UE4 |
+| `cheat/dma/hunt_offsets.ini` | Hunt: Showdown | CryEngine |
+| `cheat/dma/bf2042_offsets.ini` | Battlefield 2042 | Frostbite |
+| `cheat/dma/valorant_offsets.ini` | VALORANT | UE4 |
 
-- Visual Studio 2022 with C++ desktop workload
-- Windows SDK 10.0+
-- C++17 standard
-- x64 target (Unturned is 64-bit)
+### External Cheats (ReadProcessMemory)
+
+| File | Description |
+|------|-------------|
+| `cheat/external/apex_external.cpp` | Apex Legends external — Source 2 |
+| `cheat/external/deltaforce_external.cpp` | Delta Force external — UE5 |
+| `cheat/external/externaltest.cpp` | Unturned external — Mono reflection |
+| `cheat/external/features.h` | Feature implementations (ESP, aimbot, etc.) |
+| `cheat/external/overlay.h` | GDI overlay rendering |
+| `cheat/external/mem.h` / `mem.cpp` | Memory read/write with SEH |
+| `cheat/external/mono.h` | Mono runtime reflection |
+| `cheat/external/unturned.h` / `.cpp` | Unturned game class resolution |
+| `cheat/external/math.h` | Angle calc, world-to-screen |
+| `cheat/external/config.h` | Hotkeys and settings |
+| `cheat/external/decrypt.h` | Pointer decryption |
+| `cheat/external/xstr.h` | XOR string obfuscation |
+| `cheat/external/betest_mem.hpp` | BattlEye test memory primitives |
+| `cheat/external/betest_stealth.hpp` | BattlEye stealth helpers |
+| `cheat/external/gmr_mem.hpp` | GmrDrv memory backend |
+
+### Internal Cheats (DLL Injection)
+
+| File | Description |
+|------|-------------|
+| `dllmain.cpp` | Unturned internal — Mono reflection, 29 features, GDI overlay |
+| `cheat/internal/unturned_internal.cpp` | Unturned internal alt implementation |
+| `cheat/internal/mem_internal.hpp` | Internal memory helpers |
+| `external/` | Shared headers (same as cheat/external/) |
+| `coopyy_dll.sln` | Visual Studio solution |
+
+## Tools
+
+| File | Description |
+|------|-------------|
+| `tools/dumper2.cpp` | **Game dumper** — engine detection, pattern scanning, **heuristic offset discovery** (string xref tracing, singleton pattern analysis, field offset enumeration). Supports R6/AnvilNext, UE5 (DF, AB), Unity/IL2CPP (Rust). Produces `_offsets.ini` automatically. |
+| `tools/dumper2.exe` | Built dumper2 binary |
+| `tools/dumper.cpp` | Original dumper (v1) |
+| `tools/dumper_dma.cpp` | DMA-based dumper |
+| `tools/static_dumper.cpp` | Static PE analysis dumper |
+| `tools/apex_dumper.cpp` | Apex Legends specific dumper |
+| `tools/offset_mgr.cpp` | Offset manager — tracks and updates offsets |
+| `tools/ac_killer.cpp` | Anti-cheat service killer |
+| `tools/ac_launch.cpp` | Anti-cheat aware game launcher |
+| `tools/be_freeze.cpp` | BattlEye freeze/suspend tool |
+| `tools/scan.cpp` | Memory scanner |
+| `tools/probe.cpp` / `probe2.cpp` | Driver probe tools |
+| `tools/smoke_nal.cpp` | NalDrv smoke test |
+| `tools/nttest.cpp` | NT API test |
+| `tools/asusopen.cpp` / `asusprobe.cpp` / `asussec.cpp` | ASUS driver probe tools |
+
+## Injector
+
+| File | Description |
+|------|-------------|
+| `injector/injector.cpp` | DLL injector — `CreateRemoteThread` + `LoadLibraryA` |
+
+## Build Scripts
+
+All in `build_scripts/`:
+
+| Script | Target |
+|--------|--------|
+| `bld_nal.cmd` | Mapper (main_nal.cpp) |
+| `bld_r6_dma.cmd` | R6 Siege DMA cheat |
+| `bld_df_dma.cmd` | Delta Force DMA cheat |
+| `bld_abi_dma.cmd` | Arena Breakout DMA cheat |
+| `bld_dma_radar.cmd` | Universal DMA radar |
+| `bld_apex.cmd` | Apex external cheat |
+| `bld_df.cmd` | Delta Force external |
+| `bld_apex_dumper.cmd` | Apex dumper |
+| `bld2.cmd` | Dumper2 |
+| `bld_dumper.cmd` | Dumper v1 |
+| `bld_loader.cmd` | Driver loader |
+| `bld_drv.cmd` | Kernel driver |
+| `bld_inject.cmd` | Injector |
+| `bld_internal.cmd` | Internal cheat DLL |
+| `bld_ext.cmd` | External cheat |
+| `build_full.cmd` | Full rebuild (all targets) |
+
+## Key Technical Notes
+
+- **BYOVD pipeline**: `main_nal.cpp` loads a vulnerable signed driver, uses its phys R/W IOCTLs to map unsigned code into kernel space
+- **TRIXX freezes under VBox/Hyper-V**: use `--driver nal` in VMs with nested virtualization
+- **TRIXX works in VMware Workstation**: safe for testing
+- **DMA radar is multi-user**: `/radar` endpoint accessible to anyone on LAN; admin panel (`/`, `/menu`, `/api/set`) is localhost-only
+- **Dumper2 heuristic analysis**: replaces IDA dependency — scans raw PE dumps for manager strings, traces code xrefs to find singleton globals, discovers struct field offsets, extracts sig patterns. Works for R6 (AnvilNext), Delta Force/Arena Breakout (UE5), Rust (Unity/IL2CPP)
+- **All AC testing is single-player/offline only**
+- **Never restart the host PC** — test in VMTEST VM
+- **NalDrvIntel is on MS Vulnerable Driver Blocklist** — mapper auto-disables the blocklist on startup
