@@ -854,6 +854,53 @@ namespace Exports {
     // 0x11636B60  g_pAKPluginList
 }
 
+// ============================================
+// AnvilNext 2.0 Structure Offsets
+// Source: DYNAMIC DISCOVERY via brute-force scan
+// ============================================
+
+namespace R6_GameManager {
+    constexpr uintptr_t EntityList  = 0x130;  // DISCOVERED
+    constexpr uintptr_t EntityCount = 0x140;  // DISCOVERED
+}
+
+namespace R6_Entity {
+    constexpr uintptr_t Pawn              = 0x20;
+    constexpr uintptr_t Replication       = 0xC8;
+    constexpr uintptr_t ComponentChain    = 0xD8;
+    constexpr uintptr_t HeadPosition      = 0x3C;   // Vec3 DISCOVERED
+    constexpr uintptr_t FeetPosition      = 0x700;  // Vec3
+}
+
+namespace R6_Replication {
+    constexpr uintptr_t TeamID = 0x190;
+}
+
+namespace R6_Component {
+    constexpr uintptr_t ChildComponent = 0x8;
+    constexpr uintptr_t Health         = 0x168;  // int32
+}
+
+// ============================================
+// Pointer Chain Reference
+// ============================================
+//
+// Entity chain:
+//   [GameManager] -> +0x130 = EntityList
+//   EntityList[i * 0x8] = Entity
+//   Entity + 0x20 = Pawn
+//   Entity + 0x3C = Head (Vec3)
+//   Entity + 0x700 = Feet (Vec3)
+//
+// Health chain:
+//   Entity + 0xD8 -> + 0x8 -> + 0x168 = Health
+//
+// Team chain:
+//   Entity + 0xC8 -> + 0x190 = TeamID
+//
+// NOTE: GameManager pointer may be encrypted (XOR + ROL).
+//       Decryption keys change per patch.
+
 // === d3d11.dll @ 0x7FFBC52A0000 ===
 // ImageSize: 0x264000 (2448 KB)
 // TimeDateStamp: 0x7D0ACBED

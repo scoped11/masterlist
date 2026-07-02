@@ -201,15 +201,15 @@ namespace R6_Statics {
 // ============================================
 
 namespace R6_GameManager {
-    constexpr uintptr_t EntityList  = 0x1C8;
-    constexpr uintptr_t EntityCount = 0x1D0;
+    constexpr uintptr_t EntityList  = 0x130;  // DISCOVERED
+    constexpr uintptr_t EntityCount = 0x140;  // DISCOVERED
 }
 
 namespace R6_Entity {
     constexpr uintptr_t Pawn              = 0x20;
     constexpr uintptr_t Replication       = 0xC8;
     constexpr uintptr_t ComponentChain    = 0xD8;
-    constexpr uintptr_t HeadPosition      = 0x6A0;  // Vec3
+    constexpr uintptr_t HeadPosition      = 0x3C;   // Vec3 DISCOVERED
     constexpr uintptr_t FeetPosition      = 0x700;  // Vec3
 }
 
@@ -249,10 +249,10 @@ namespace R6_Camera {
 // ============================================
 //
 // Entity chain:
-//   [GameManager] -> +0x1C8 = EntityList
+//   [GameManager] -> +0x130 = EntityList
 //   EntityList[i * 0x8] = Entity
 //   Entity + 0x20 = Pawn
-//   Entity + 0x6A0 = Head (Vec3)
+//   Entity + 0x3C = Head (Vec3)
 //   Entity + 0x700 = Feet (Vec3)
 //
 // Health chain:
