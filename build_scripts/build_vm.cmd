@@ -1,0 +1,3 @@
+@echo on
+call "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+cl /nologo /EHsc /std:c++17 /W4 /D_WIN32_WINNT=0x0A00 /I"C:\Users\K\Desktop\PenisFinger\mapper" /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um" /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared" /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt" "C:\Users\K\Desktop\PenisFinger\mapper\mapper.cpp" "C:\Users\K\Desktop\PenisFinger\mapper\main_vm.cpp" /Fe"C:\Users\K\Desktop\PenisFinger\build\mapper_vm.exe" /link /LIBPATH:"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64" /LIBPATH:"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64" kernel32.lib ntdll.lib

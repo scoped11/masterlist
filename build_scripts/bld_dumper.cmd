@@ -1,0 +1,6 @@
+@echo off
+call "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 > nul
+echo Building dumper2.exe...
+cl /nologo /EHsc /std:c++17 /W3 /D_WIN32_WINNT=0x0A00 /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um" /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared" /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt" "C:\Users\K\Desktop\PenisFinger\tools\source\dumper2.cpp" /Fe"C:\Users\K\Desktop\PenisFinger\build\dumper2.exe" /link /LIBPATH:"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64" /LIBPATH:"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64" kernel32.lib ntdll.lib advapi32.lib
+echo Building offset_mgr.exe...
+cl /nologo /EHsc /std:c++17 /W3 /D_WIN32_WINNT=0x0A00 /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um" /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared" /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt" "C:\Users\K\Desktop\PenisFinger\tools\source\offset_mgr.cpp" /Fe"C:\Users\K\Desktop\PenisFinger\build\offset_mgr.exe" /link /LIBPATH:"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64" /LIBPATH:"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64" kernel32.lib ntdll.lib

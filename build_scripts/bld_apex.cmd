@@ -1,0 +1,3 @@
+@echo off
+call "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 > nul
+cl /nologo /EHsc /std:c++17 /O2 /W3 /MT /D_WIN32_WINNT=0x0A00 /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um" /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared" /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt" "C:\Users\K\Desktop\PenisFinger\source\cheat\apex_external.cpp" /Fe"C:\Users\K\Desktop\PenisFinger\build\apex_external.exe" /link /LIBPATH:"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64" /LIBPATH:"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64" kernel32.lib user32.lib gdi32.lib advapi32.lib dwmapi.lib winmm.lib
