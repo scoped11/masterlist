@@ -362,7 +362,7 @@ static const KnownGame g_knownGames[] = {
     {"eldenring.exe",      "Elden Ring",             ENGINE_CUSTOM,    "EAC",       {"eldenring.exe", nullptr, nullptr, nullptr}},
     {"OverwatchPE.exe",    "Overwatch 2",            ENGINE_CUSTOM,    "Custom",    {"OverwatchPE.exe", nullptr, nullptr, nullptr}},
     {"destiny2.exe",       "Destiny 2",              ENGINE_CUSTOM,    "Custom",    {"destiny2.exe", nullptr, nullptr, nullptr}},
-    {"Rainbow6.exe",       "Rainbow Six Siege",      ENGINE_CUSTOM,    "BattlEye",  {"Rainbow6.exe", nullptr, nullptr, nullptr}},
+    {"RainbowSix.exe",     "Rainbow Six Siege",      ENGINE_CUSTOM,    "BattlEye",  {"RainbowSix.exe", nullptr, nullptr, nullptr}},
     {"HogwartsLegacy.exe", "Hogwarts Legacy",        ENGINE_UNREAL,    "None",      {nullptr, nullptr, nullptr, nullptr}},
     {"Cyberpunk2077.exe",  "Cyberpunk 2077",         ENGINE_CUSTOM,    "None",      {"Cyberpunk2077.exe", nullptr, nullptr, nullptr}},
     {"deadlock.exe",       "Deadlock",               ENGINE_SOURCE2,   "VAC",       {"deadlock.exe", "client.dll", nullptr, nullptr}},
@@ -830,6 +830,435 @@ static std::vector<StringRef> ScanStringRefs(const std::vector<uint8_t>& image,
     return refs;
 }
 
+// ── Heuristic Offset Discovery (string xrefs → global pointers → struct fields) ─
+
+struct FoundString {
+    std::string value;
+    uint64_t    rva;
+};
+
+static std::vector<FoundString> FindTargetStrings(
+    const std::vector<uint8_t>& image,
+    const std::vector<IMAGE_SECTION_HEADER>& secs,
+    const std::vector<std::string>& targets)
+{
+    std::vector<FoundString> found;
+    for (auto& s : secs) {
+        char sname[9]{};
+        memcpy(sname, s.Name, 8);
+        if (strcmp(sname, ".rdata") != 0 && strcmp(sname, ".data") != 0 &&
+            strcmp(sname, ".text") != 0)
+            continue;
+        uint32_t va = s.VirtualAddress;
+        uint32_t sz = s.Misc.VirtualSize;
+        if (va + sz > image.size()) continue;
+
+        for (uint32_t i = 0; i + 4 < sz; i++) {
+            const char* p = (const char*)(image.data() + va + i);
+            if (*p < 0x20 || *p > 0x7e) continue;
+            int len = 0;
+            while (len < 80 && p[len] >= 0x20 && p[len] <= 0x7e) len++;
+            if (len < 4 || p[len] != 0) continue;
+
+            std::string str(p, len);
+            for (auto& t : targets) {
+                if (ContainsCI(str.c_str(), t.c_str())) {
+                    found.push_back({str, va + i});
+                    break;
+                }
+            }
+            i += len;
+        }
+    }
+    return found;
+}
+
+struct CodeXref {
+    uint64_t codeRva;
+    uint64_t targetRva;
+};
+
+static std::vector<CodeXref> FindCodeXrefs(
+    const std::vector<uint8_t>& image,
+    const std::vector<IMAGE_SECTION_HEADER>& secs,
+    uint64_t targetRva,
+    uint64_t imageBase)
+{
+    std::vector<CodeXref> xrefs;
+    for (auto& s : secs) {
+        char sname[9]{};
+        memcpy(sname, s.Name, 8);
+        if (!(s.Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        uint32_t va = s.VirtualAddress;
+        uint32_t sz = s.Misc.VirtualSize;
+        if (va + sz > image.size()) continue;
+        const uint8_t* text = image.data() + va;
+
+        for (uint32_t i = 0; i + 7 < sz; i++) {
+            // LEA reg, [rip+disp32]:  48 8D xx xxxxxxxx
+            // MOV reg, [rip+disp32]:  48 8B xx xxxxxxxx
+            if (text[i] == 0x48 && (text[i+1] == 0x8D || text[i+1] == 0x8B)) {
+                uint8_t modrm = text[i+2];
+                if ((modrm & 0xC7) == 0x05 || (modrm & 0xC7) == 0x0D ||
+                    (modrm & 0xC7) == 0x15 || (modrm & 0xC7) == 0x1D ||
+                    (modrm & 0xC7) == 0x25 || (modrm & 0xC7) == 0x2D ||
+                    (modrm & 0xC7) == 0x35 || (modrm & 0xC7) == 0x3D) {
+                    int32_t disp = *(int32_t*)(text + i + 3);
+                    uint64_t instrEnd = va + i + 7;
+                    uint64_t resolved = instrEnd + disp;
+                    if (resolved == targetRva) {
+                        xrefs.push_back({va + i, targetRva});
+                    }
+                }
+            }
+            // 4C 8D / 4C 8B variants (R8-R15)
+            if (text[i] == 0x4C && (text[i+1] == 0x8D || text[i+1] == 0x8B)) {
+                uint8_t modrm = text[i+2];
+                if ((modrm & 0xC7) == 0x05 || (modrm & 0xC7) == 0x0D ||
+                    (modrm & 0xC7) == 0x15 || (modrm & 0xC7) == 0x1D ||
+                    (modrm & 0xC7) == 0x25 || (modrm & 0xC7) == 0x2D ||
+                    (modrm & 0xC7) == 0x35 || (modrm & 0xC7) == 0x3D) {
+                    int32_t disp = *(int32_t*)(text + i + 3);
+                    uint64_t instrEnd = va + i + 7;
+                    uint64_t resolved = instrEnd + disp;
+                    if (resolved == targetRva) {
+                        xrefs.push_back({va + i, targetRva});
+                    }
+                }
+            }
+        }
+    }
+    return xrefs;
+}
+
+struct NearbyGlobal {
+    uint64_t codeRva;
+    uint64_t globalRva;
+    bool     isLoad; // true = MOV (load ptr value), false = LEA (load address)
+};
+
+static std::vector<NearbyGlobal> FindNearbyGlobals(
+    const std::vector<uint8_t>& image,
+    const std::vector<IMAGE_SECTION_HEADER>& secs,
+    uint64_t nearRva,
+    int range = 128)
+{
+    uint64_t dataStart = 0, dataEnd = 0;
+    for (auto& s : secs) {
+        char sname[9]{};
+        memcpy(sname, s.Name, 8);
+        if (strcmp(sname, ".data") == 0 || strcmp(sname, ".bss") == 0) {
+            if (dataStart == 0 || s.VirtualAddress < dataStart) dataStart = s.VirtualAddress;
+            uint64_t e = s.VirtualAddress + s.Misc.VirtualSize;
+            if (e > dataEnd) dataEnd = e;
+        }
+    }
+    if (dataStart == 0) {
+        // Fallback: anything past .text is probably data
+        for (auto& s : secs) {
+            char sname[9]{};
+            memcpy(sname, s.Name, 8);
+            if (strcmp(sname, ".text") == 0) {
+                dataStart = s.VirtualAddress + s.Misc.VirtualSize;
+                dataEnd = (uint64_t)image.size();
+                break;
+            }
+        }
+    }
+
+    std::vector<NearbyGlobal> results;
+    uint64_t start = nearRva > (uint64_t)range ? nearRva - range : 0;
+    uint64_t end = nearRva + range;
+    if (end + 7 > image.size()) end = image.size() - 7;
+
+    for (uint64_t i = start; i < end; i++) {
+        if (i + 7 > image.size()) break;
+        const uint8_t* b = image.data() + i;
+        if ((b[0] == 0x48 || b[0] == 0x4C) && (b[1] == 0x8B || b[1] == 0x8D)) {
+            uint8_t modrm = b[2];
+            if ((modrm & 0x07) == 0x05) { // RIP-relative
+                int32_t disp = *(int32_t*)(b + 3);
+                uint64_t instrEnd = i + 7;
+                uint64_t target = instrEnd + disp;
+                if (target >= dataStart && target < dataEnd) {
+                    results.push_back({i, target, b[1] == 0x8B});
+                }
+            }
+        }
+    }
+    return results;
+}
+
+struct FieldAccess {
+    uint32_t offset;
+    int      count;
+};
+
+static std::vector<FieldAccess> DiscoverFieldOffsets(
+    const std::vector<uint8_t>& image,
+    const std::vector<IMAGE_SECTION_HEADER>& secs,
+    uint64_t globalRva,
+    uint64_t imageBase)
+{
+    auto xrefs = FindCodeXrefs(image, secs, globalRva, imageBase);
+    std::map<uint32_t, int> offsetVotes;
+
+    for (auto& xr : xrefs) {
+        // Scan forward ~256 bytes from the xref for [reg+offset] patterns
+        uint64_t start = xr.codeRva;
+        uint64_t end = start + 256;
+        if (end > image.size()) end = image.size();
+        const uint8_t* code = image.data();
+
+        for (uint64_t ea = start; ea + 4 < end; ea++) {
+            // MOV reg, [reg+disp32]:  48 8B xx xxxxxxxx where modrm has mod=10
+            if (code[ea] == 0x48 && (code[ea+1] == 0x8B || code[ea+1] == 0x89 || code[ea+1] == 0x8D)) {
+                uint8_t modrm = code[ea+2];
+                uint8_t mod = (modrm >> 6) & 3;
+                if (mod == 2 && ea + 7 <= end) { // [reg+disp32]
+                    int32_t disp = *(int32_t*)(code + ea + 3);
+                    if (disp > 0 && disp < 0x2000) {
+                        offsetVotes[disp]++;
+                    }
+                }
+                if (mod == 1 && ea + 4 <= end) { // [reg+disp8]
+                    int8_t disp = (int8_t)code[ea+3];
+                    if (disp > 0) {
+                        offsetVotes[(uint32_t)disp]++;
+                    }
+                }
+            }
+        }
+    }
+
+    std::vector<FieldAccess> fields;
+    for (auto& [off, cnt] : offsetVotes) {
+        if (cnt >= 2) // Only report offsets accessed at least twice
+            fields.push_back({off, cnt});
+    }
+    std::sort(fields.begin(), fields.end(), [](auto& a, auto& b){ return a.count > b.count; });
+    return fields;
+}
+
+static std::string BuildSigPattern(const std::vector<uint8_t>& image, uint64_t instrRva, int contextAfter = 8) {
+    if (instrRva + 7 > image.size()) return "";
+    const uint8_t* b = image.data() + instrRva;
+    // Instruction is 7 bytes: REX + opcode + modrm + 4-byte displacement
+    // Wildcard the displacement (bytes 3-6)
+    std::string pat;
+    char hex[4];
+    for (int i = 0; i < 3; i++) {
+        if (i > 0) pat += " ";
+        snprintf(hex, sizeof(hex), "%02X", b[i]);
+        pat += hex;
+    }
+    pat += " ?? ?? ?? ??";
+    // Add context bytes after the instruction
+    for (int i = 7; i < 7 + contextAfter && instrRva + i < image.size(); i++) {
+        snprintf(hex, sizeof(hex), " %02X", b[i]);
+        pat += hex;
+    }
+    return pat;
+}
+
+struct ManagerCandidate {
+    std::string name;
+    uint64_t    globalRva;
+    std::string sigPattern;
+    int         votes;
+    std::vector<FieldAccess> fields;
+};
+
+static std::vector<ManagerCandidate> HeuristicManagerScan(
+    const std::vector<uint8_t>& image,
+    uint64_t imageBase,
+    const std::vector<IMAGE_SECTION_HEADER>& secs,
+    const std::vector<std::string>& managerStrings)
+{
+    printf("  [*] Heuristic manager discovery via string xrefs...\n");
+
+    auto foundStrings = FindTargetStrings(image, secs, managerStrings);
+    printf("    Found %zu matching strings in data sections\n", foundStrings.size());
+
+    std::map<std::string, std::map<uint64_t, int>> candidateVotes; // name -> {globalRva -> votes}
+
+    for (auto& fs : foundStrings) {
+        auto xrefs = FindCodeXrefs(image, secs, fs.rva, imageBase);
+        if (xrefs.empty()) continue;
+        printf("    '%s' @ RVA 0x%llX: %zu code xrefs\n",
+               fs.value.c_str(), (unsigned long long)fs.rva, xrefs.size());
+
+        // Determine which manager name this string corresponds to
+        std::string mgrName = "";
+        for (auto& t : managerStrings) {
+            if (ContainsCI(fs.value.c_str(), t.c_str())) {
+                mgrName = t;
+                break;
+            }
+        }
+        if (mgrName.empty()) continue;
+
+        for (auto& xr : xrefs) {
+            auto globals = FindNearbyGlobals(image, secs, xr.codeRva);
+            for (auto& g : globals) {
+                if (g.isLoad) { // MOV = loading a pointer value (singleton access)
+                    candidateVotes[mgrName][g.globalRva]++;
+                }
+            }
+        }
+    }
+
+    // Also run structural pattern scanning (MOV+TEST+JZ heuristic)
+    printf("  [*] Structural pattern scan (MOV+TEST+JZ → singleton access)...\n");
+    uint64_t dataStart = 0, dataEnd = 0;
+    for (auto& s : secs) {
+        char sname[9]{};
+        memcpy(sname, s.Name, 8);
+        if (strcmp(sname, ".data") == 0 || strcmp(sname, ".bss") == 0) {
+            if (dataStart == 0 || s.VirtualAddress < dataStart) dataStart = s.VirtualAddress;
+            uint64_t e = s.VirtualAddress + s.Misc.VirtualSize;
+            if (e > dataEnd) dataEnd = e;
+        }
+    }
+
+    for (auto& s : secs) {
+        if (!(s.Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        uint32_t va = s.VirtualAddress;
+        uint32_t sz = s.Misc.VirtualSize;
+        if (va + sz > image.size()) continue;
+        const uint8_t* text = image.data() + va;
+
+        for (uint32_t i = 0; i + 20 < sz; i++) {
+            // MOV reg, [rip+disp32]
+            if (text[i] != 0x48 || text[i+1] != 0x8B) continue;
+            uint8_t modrm = text[i+2];
+            if ((modrm & 0x07) != 0x05) continue; // not RIP-relative
+
+            int32_t disp = *(int32_t*)(text + i + 3);
+            uint64_t instrEnd = va + i + 7;
+            uint64_t target = instrEnd + disp;
+            if (target < dataStart || target >= dataEnd) continue;
+
+            // Check next instruction: TEST reg,reg (48 85 xx)
+            uint32_t next = i + 7;
+            if (next + 3 >= sz) continue;
+            if (text[next] != 0x48 || text[next+1] != 0x85) continue;
+
+            // Check: JZ/JE (74 xx or 0F 84 xx xx xx xx)
+            uint32_t jmp = next + 3;
+            if (jmp >= sz) continue;
+            if (text[jmp] != 0x74 && !(text[jmp] == 0x0F && jmp+1 < sz && text[jmp+1] == 0x84)) continue;
+
+            // This looks like a singleton access pattern
+            candidateVotes["_structural"][target]++;
+        }
+    }
+
+    // Build results: pick best candidate per manager name
+    std::vector<ManagerCandidate> results;
+    for (auto& [name, votes] : candidateVotes) {
+        if (votes.empty()) continue;
+        // Find the RVA with most votes
+        uint64_t bestRva = 0;
+        int bestVotes = 0;
+        for (auto& [rva, v] : votes) {
+            if (v > bestVotes) { bestVotes = v; bestRva = rva; }
+        }
+        if (bestRva == 0) continue;
+
+        ManagerCandidate mc;
+        mc.name = name;
+        mc.globalRva = bestRva;
+        mc.votes = bestVotes;
+
+        // Extract sig pattern from the first xref to this global
+        auto xrefs = FindCodeXrefs(image, secs, bestRva, imageBase);
+        if (!xrefs.empty()) {
+            mc.sigPattern = BuildSigPattern(image, xrefs[0].codeRva);
+        }
+
+        // Discover struct field offsets
+        mc.fields = DiscoverFieldOffsets(image, secs, bestRva, imageBase);
+
+        printf("    %s: RVA 0x%llX (%d votes, %zu xrefs, %zu field offsets)\n",
+               name.c_str(), (unsigned long long)bestRva, bestVotes,
+               xrefs.size(), mc.fields.size());
+        if (!mc.sigPattern.empty())
+            printf("      Sig: %s\n", mc.sigPattern.c_str());
+        for (auto& f : mc.fields) {
+            if (f.count >= 3)
+                printf("      +0x%X (%d accesses)\n", f.offset, f.count);
+        }
+
+        results.push_back(mc);
+    }
+
+    std::sort(results.begin(), results.end(), [](auto& a, auto& b){ return a.votes > b.votes; });
+    return results;
+}
+
+static void WriteDiscoveredINI(const char* path,
+                                const std::vector<ManagerCandidate>& managers,
+                                const std::vector<PatternResult>& engineOffsets,
+                                uint64_t imageBase,
+                                const char* gameName)
+{
+    FILE* f = fopen(path, "w");
+    if (!f) return;
+
+    fprintf(f, "; Auto-discovered offsets for %s\n", gameName);
+    fprintf(f, "; Image base: 0x%llX\n", (unsigned long long)imageBase);
+    fprintf(f, "; Run dumper again after game update to refresh\n\n");
+
+    fprintf(f, "[Game]\n");
+    fprintf(f, "Name=%s\n\n", gameName);
+
+    fprintf(f, "[Managers]\n");
+    for (auto& m : managers) {
+        if (m.name[0] == '_') continue; // skip internal names like _structural
+        fprintf(f, "%s=0x%llX\n", m.name.c_str(), (unsigned long long)m.globalRva);
+    }
+    fprintf(f, "\n");
+
+    if (!engineOffsets.empty()) {
+        fprintf(f, "[EngineOffsets]\n");
+        for (auto& o : engineOffsets) {
+            if (o.resolvedAddr)
+                fprintf(f, "%s=0x%llX\n", o.name.c_str(), (unsigned long long)(o.resolvedAddr - imageBase));
+            else
+                fprintf(f, "%s=0x%llX\n", o.name.c_str(), (unsigned long long)o.rva);
+        }
+        fprintf(f, "\n");
+    }
+
+    fprintf(f, "[Patterns]\n");
+    for (auto& m : managers) {
+        if (m.name[0] == '_' || m.sigPattern.empty()) continue;
+        fprintf(f, "%s_Bytes=%s\n", m.name.c_str(), m.sigPattern.c_str());
+        fprintf(f, "%s_RipOffset=3\n", m.name.c_str());
+    }
+    fprintf(f, "\n");
+
+    fprintf(f, "[FieldOffsets]\n");
+    fprintf(f, "; Most-accessed struct field offsets (higher count = more likely real)\n");
+    for (auto& m : managers) {
+        if (m.name[0] == '_' || m.fields.empty()) continue;
+        fprintf(f, "; %s fields:\n", m.name.c_str());
+        for (auto& fl : m.fields) {
+            if (fl.count >= 2)
+                fprintf(f, ";   +0x%X = %d accesses\n", fl.offset, fl.count);
+        }
+    }
+    fprintf(f, "\n");
+
+    fprintf(f, "[Encryption]\n");
+    fprintf(f, "DecryptKey=0x0\n");
+    fprintf(f, "DecryptRotation=0\n");
+
+    fclose(f);
+    printf("[+] Discovered offsets written: %s\n", path);
+}
+
 // ── Auto-Detect Running Games ───────────────────────────────────────────────────
 
 struct DetectedGame {
@@ -1199,7 +1628,14 @@ int main(int argc, char* argv[]) {
 
             // Check known games
             for (auto& g : g_knownGames) {
-                if (_stricmp(fname, g.processName) == 0) { knownGame = &g; break; }
+                {
+                    // Exact match or fuzzy: strip .exe from known name and check if dump filename contains it
+                    std::string stem(g.processName);
+                    auto dot = stem.rfind('.');
+                    if (dot != std::string::npos) stem = stem.substr(0, dot);
+                    if (_stricmp(fname, g.processName) == 0 || (stem.size() >= 4 && ContainsCI(fname, stem.c_str())))
+                    { knownGame = &g; break; }
+                }
             }
 
             // Engine detection
@@ -1340,6 +1776,41 @@ int main(int argc, char* argv[]) {
                     printf("    RVA 0x%08llX -> \"%s\"\n", (unsigned long long)s.codeRva, s.value.c_str());
                 printf("    (%zu string references)\n", sr.size());
                 for (auto& s : sr) allStrRefs.push_back(s);
+            }
+
+            // Heuristic manager discovery
+            if (extractOffsets && image.size() > 0x1000) {
+                std::vector<std::string> mgrStrings;
+                GameEngine eng = (forceEngine != ENGINE_UNKNOWN) ? forceEngine
+                               : (knownGame ? knownGame->engine : engine.engine);
+                if (eng == ENGINE_CUSTOM) {
+                    mgrStrings = {"GameManager","EntityManager","CameraManager",
+                                  "PlayerManager","StatusManager","NetworkManager",
+                                  "RoundManager","SpawnManager","MatchManager"};
+                } else if (eng == ENGINE_UNREAL) {
+                    mgrStrings = {"GWorld","UWorld","GEngine","GameInstance",
+                                  "PlayerController","GameState","APlayerState",
+                                  "ULocalPlayer","ACharacter","APawn"};
+                } else if (eng == ENGINE_UNITY) {
+                    mgrStrings = {"global-metadata","il2cpp_domain_get",
+                                  "GameManager","PlayerManager","Camera",
+                                  "BaseNetworkable","BuildingBlock"};
+                }
+                if (!mgrStrings.empty()) {
+                    printf("\n  [*] Heuristic offset discovery (%s):\n", engine.name);
+                    auto managers = HeuristicManagerScan(image, nt.OptionalHeader.ImageBase, secs, mgrStrings);
+                    if (!managers.empty()) {
+                        std::string iniName = std::string(fname);
+                        auto dot = iniName.rfind('.');
+                        if (dot != std::string::npos) iniName = iniName.substr(0, dot);
+                        iniName += "_offsets.ini";
+                        WriteDiscoveredINI(iniName.c_str(), managers, allOffsets,
+                                           nt.OptionalHeader.ImageBase, fname);
+                        dumpedFiles.push_back(iniName);
+                    } else {
+                        printf("    (no manager candidates found)\n");
+                    }
+                }
             }
 
             // Section details
@@ -1701,6 +2172,40 @@ int main(int argc, char* argv[]) {
                     printf("    RVA 0x%08llX -> \"%s\"\n",
                            (unsigned long long)s.codeRva, s.value.c_str());
                 printf("    (%zu string references found)\n", stringRefs.size());
+            }
+
+            // Heuristic manager discovery
+            if (strat.scanEngineOffsets && image.size() > 0x1000) {
+                std::vector<std::string> mgrStrings;
+                GameEngine eng = engine.engine;
+                if (eng == ENGINE_CUSTOM) {
+                    mgrStrings = {"GameManager","EntityManager","CameraManager",
+                                  "PlayerManager","StatusManager","NetworkManager",
+                                  "RoundManager","SpawnManager","MatchManager"};
+                } else if (eng == ENGINE_UNREAL) {
+                    mgrStrings = {"GWorld","UWorld","GEngine","GameInstance",
+                                  "PlayerController","GameState","APlayerState",
+                                  "ULocalPlayer","ACharacter","APawn"};
+                } else if (eng == ENGINE_UNITY) {
+                    mgrStrings = {"global-metadata","il2cpp_domain_get",
+                                  "GameManager","PlayerManager","Camera",
+                                  "BaseNetworkable","BuildingBlock"};
+                }
+                if (!mgrStrings.empty()) {
+                    printf("\n[*] --- Heuristic Offset Discovery (%s) ---\n", engine.name);
+                    auto managers = HeuristicManagerScan(image, mainBase, mainSections, mgrStrings);
+                    if (!managers.empty()) {
+                        std::string iniName = procName;
+                        auto dot = iniName.rfind('.');
+                        if (dot != std::string::npos) iniName = iniName.substr(0, dot);
+                        iniName += "_offsets.ini";
+                        WriteDiscoveredINI(iniName.c_str(), managers, engineOffsets,
+                                           mainBase, procName.c_str());
+                        dumpedFiles.push_back(iniName);
+                    } else {
+                        printf("    (no manager candidates found)\n");
+                    }
+                }
             }
         }
     }
