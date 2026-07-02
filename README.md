@@ -58,11 +58,14 @@ Last updated: 2026-07-02
 | apex_external | `PenisFinger/source/cheat/apex_external.cpp` | `PenisFinger/build/apex_external.exe` | Apex Legends | External | |
 | df_external | `PenisFinger/source/cheat/deltaforce_external.cpp` | `PenisFinger/build/df_external.exe` | Delta Force | External | |
 | BetestClient | `Unturned/source/BetestClient.cpp` | `Unturned/binaries/BetestClient.exe` | — | — | Driver communication test client |
+| df_dma | `cheat/dma/deltaforce_dma.cpp` | — | Delta Force | DMA Radar | FPGA DMA via vmm.dll — runs on PC2, 2D radar + player list |
+| abi_dma | `cheat/dma/arenabreakout_dma.cpp` | — | Arena Breakout: Infinite | DMA Radar | FPGA DMA via vmm.dll — player radar + loot radar |
 
 ## 5. Tools
 
 | Name | Source | Binary | Purpose |
 |------|--------|--------|---------|
+| dumper_dma | `tools/dumper_dma.cpp` | — | DMA memory dumper via FPGA — reads unpacked memory at hardware level |
 | dumper2 | `PenisFinger/tools/source/dumper2.cpp` | `PenisFinger/build/dumper2.exe` | Process/module memory dumper |
 | static_dumper | `PenisFinger/tools/source/static_dumper.cpp` | `PenisFinger/build/static_dumper.exe` | Static PE dumper |
 | apex_dumper | `PenisFinger/tools/source/apex_dumper.cpp` | `PenisFinger/build/apex_dumper.exe` | Apex Legends memory dumper |
@@ -147,7 +150,8 @@ struct NalOp {
 |------|-----|--------|-------|-----|
 | Unturned | BattlEye | Works | BSOD on host | Works |
 | Apex Legends | EAC | Blocked | Works (VM only) | Works |
-| Delta Force | EAC | Blocked | Works (VM only) | Works |
+| Delta Force | EAC | Blocked | Works (VM only) | Works — `deltaforce_dma.cpp` |
+| Arena Breakout: Infinite | ACE | Blocked | N/A | Works — `arenabreakout_dma.cpp` |
 
 ### Host Machine
 - CPU: Intel i9-12900K (VT-x on, VT-d off)
