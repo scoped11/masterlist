@@ -1,12 +1,14 @@
-// Delta Force DMA External — ESP radar via FPGA DMA card
-// Runs on PC2 (radar), reads PC1 (target) memory over hardware DMA.
-// Completely invisible to all anti-cheat — reads happen at the PCIe level.
+// Delta Force DMA Cheat — Full-feature DMA via FPGA card
+// UE5 GWorld chain reader + DMA write features + web menu
+// Runs on PC2 (cheat), reads/writes PC1 (target) memory over hardware DMA.
 //
 // Requirements: vmm.dll + leechcore.dll in same directory (from MemProcFS)
-// Build: cl /O2 /EHsc deltaforce_dma.cpp gdi32.lib user32.lib winmm.lib /link /SUBSYSTEM:WINDOWS
+// Build: cl /O2 /EHsc /D_CRT_SECURE_NO_WARNINGS deltaforce_dma.cpp gdi32.lib user32.lib winmm.lib ws2_32.lib /link /SUBSYSTEM:WINDOWS
 
 #undef UNICODE
 #undef _UNICODE
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <cstdio>
 #include <cstdint>
@@ -19,66 +21,102 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <sstream>
 
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "winmm.lib")
+#pragma comment(lib, "ws2_32.lib")
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// VMM API types (dynamically loaded from vmm.dll)
+// VMM API (dynamically loaded from vmm.dll)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 typedef void* VMM_HANDLE;
 
-typedef VMM_HANDLE  (__cdecl *fn_VMMDLL_Initialize)(DWORD argc, LPCSTR argv[]);
-typedef VOID        (__cdecl *fn_VMMDLL_Close)(VMM_HANDLE hVMM);
-typedef BOOL        (__cdecl *fn_VMMDLL_PidGetFromName)(VMM_HANDLE hVMM, LPCSTR szProcName, PDWORD pdwPID);
-typedef BOOL        (__cdecl *fn_VMMDLL_MemReadEx)(VMM_HANDLE hVMM, DWORD dwPID, ULONG64 qwA, PBYTE pb, DWORD cb, PDWORD pcbReadOpt, ULONG64 flags);
-typedef ULONG64     (__cdecl *fn_VMMDLL_ProcessGetModuleBaseU)(VMM_HANDLE hVMM, DWORD dwPID, LPCSTR uszModuleName);
-typedef HANDLE      (__cdecl *fn_VMMDLL_Scatter_Initialize)(VMM_HANDLE hVMM, DWORD dwPID, DWORD flags);
-typedef BOOL        (__cdecl *fn_VMMDLL_Scatter_Prepare)(HANDLE hS, ULONG64 va, DWORD cb);
-typedef BOOL        (__cdecl *fn_VMMDLL_Scatter_Execute)(HANDLE hS);
-typedef BOOL        (__cdecl *fn_VMMDLL_Scatter_Read)(HANDLE hS, ULONG64 va, DWORD cb, PBYTE pb, PDWORD pcbRead);
-typedef VOID        (__cdecl *fn_VMMDLL_Scatter_CloseHandle)(HANDLE hS);
+typedef VMM_HANDLE  (__cdecl *fn_Init)(DWORD argc, LPCSTR argv[]);
+typedef VOID        (__cdecl *fn_Close)(VMM_HANDLE hVMM);
+typedef BOOL        (__cdecl *fn_PidGet)(VMM_HANDLE hVMM, LPCSTR szProcName, PDWORD pdwPID);
+typedef BOOL        (__cdecl *fn_MemRead)(VMM_HANDLE hVMM, DWORD dwPID, ULONG64 qwA, PBYTE pb, DWORD cb, PDWORD pcbReadOpt, ULONG64 flags);
+typedef ULONG64     (__cdecl *fn_ModBase)(VMM_HANDLE hVMM, DWORD dwPID, LPCSTR uszModuleName);
+typedef BOOL        (__cdecl *fn_MemWrite)(VMM_HANDLE hVMM, DWORD dwPID, ULONG64 qwA, PBYTE pb, DWORD cb);
 
 static VMM_HANDLE g_vmm = nullptr;
 static DWORD      g_pid = 0;
 
-static fn_VMMDLL_Initialize             pInitialize = nullptr;
-static fn_VMMDLL_Close                  pClose = nullptr;
-static fn_VMMDLL_PidGetFromName         pPidGetFromName = nullptr;
-static fn_VMMDLL_MemReadEx              pMemReadEx = nullptr;
-static fn_VMMDLL_ProcessGetModuleBaseU  pGetModuleBase = nullptr;
-static fn_VMMDLL_Scatter_Initialize     pScatterInit = nullptr;
-static fn_VMMDLL_Scatter_Prepare        pScatterPrep = nullptr;
-static fn_VMMDLL_Scatter_Execute        pScatterExec = nullptr;
-static fn_VMMDLL_Scatter_Read           pScatterRead = nullptr;
-static fn_VMMDLL_Scatter_CloseHandle    pScatterClose = nullptr;
+static fn_Init     pInit = nullptr;
+static fn_Close    pClose = nullptr;
+static fn_PidGet   pPidGet = nullptr;
+static fn_MemRead  pMemRead = nullptr;
+static fn_ModBase  pModBase = nullptr;
+static fn_MemWrite pMemWrite = nullptr;
 
 static bool LoadVMM() {
     HMODULE h = LoadLibraryA("vmm.dll");
-    if (!h) { MessageBoxA(NULL, "vmm.dll not found.\nPlace vmm.dll + leechcore.dll in the same directory.", "DMA Error", MB_ICONERROR); return false; }
-    #define LOAD(var, name) var = (decltype(var))GetProcAddress(h, name)
-    LOAD(pInitialize,    "VMMDLL_Initialize");
-    LOAD(pClose,         "VMMDLL_Close");
-    LOAD(pPidGetFromName,"VMMDLL_PidGetFromName");
-    LOAD(pMemReadEx,     "VMMDLL_MemReadEx");
-    LOAD(pGetModuleBase, "VMMDLL_ProcessGetModuleBaseU");
-    LOAD(pScatterInit,   "VMMDLL_Scatter_Initialize");
-    LOAD(pScatterPrep,   "VMMDLL_Scatter_Prepare");
-    LOAD(pScatterExec,   "VMMDLL_Scatter_Execute");
-    LOAD(pScatterRead,   "VMMDLL_Scatter_Read");
-    LOAD(pScatterClose,  "VMMDLL_Scatter_CloseHandle");
-    #undef LOAD
-    return pInitialize && pMemReadEx;
+    if (!h) { MessageBoxA(NULL, "vmm.dll not found.\nPlace vmm.dll + leechcore.dll here.", "DMA Error", MB_ICONERROR); return false; }
+    pInit     = (fn_Init)    GetProcAddress(h, "VMMDLL_Initialize");
+    pClose    = (fn_Close)   GetProcAddress(h, "VMMDLL_Close");
+    pPidGet   = (fn_PidGet)  GetProcAddress(h, "VMMDLL_PidGetFromName");
+    pMemRead  = (fn_MemRead) GetProcAddress(h, "VMMDLL_MemReadEx");
+    pModBase  = (fn_ModBase) GetProcAddress(h, "VMMDLL_ProcessGetModuleBaseU");
+    pMemWrite = (fn_MemWrite)GetProcAddress(h, "VMMDLL_MemWrite");
+    return pInit && pMemRead;
 }
 
 static bool DmaRead(uint64_t va, void* buf, uint32_t size) {
     DWORD cbRead = 0;
-    return pMemReadEx(g_vmm, g_pid, va, (PBYTE)buf, size, &cbRead, 0x0002) && cbRead > 0;
+    return pMemRead(g_vmm, g_pid, va, (PBYTE)buf, size, &cbRead, 0x0002) && cbRead > 0;
 }
 
 template<class T> T rpm(uint64_t addr) { T v{}; DmaRead(addr, &v, sizeof(T)); return v; }
+
+static bool DmaWrite(uint64_t va, void* buf, uint32_t size) {
+    if (!pMemWrite) return false;
+    return pMemWrite(g_vmm, g_pid, va, (PBYTE)buf, size);
+}
+
+template<class T> bool wpm(uint64_t addr, T val) { return DmaWrite(addr, &val, sizeof(T)); }
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Feature config — toggled from web menu
+// ═══════════════════════════════════════════════════════════════════════════════
+
+namespace Config {
+    // Combat
+    inline std::atomic<bool> aimbot{false};
+    inline std::atomic<bool> triggerbot{false};
+    inline std::atomic<bool> noRecoil{false};
+    inline std::atomic<bool> noSpread{false};
+    inline std::atomic<bool> rapidFire{false};
+    // ESP / Visuals
+    inline std::atomic<bool> radar{true};
+    inline std::atomic<bool> glow{false};
+    inline std::atomic<bool> chams{false};
+    inline std::atomic<bool> fovChanger{false};
+    inline std::atomic<bool> espBox{false};
+    inline std::atomic<bool> espName{false};
+    inline std::atomic<bool> espHealth{false};
+    inline std::atomic<bool> espDistance{false};
+    inline std::atomic<bool> espSkeleton{false};
+    inline std::atomic<bool> espSnaplines{false};
+    // Misc
+    inline std::atomic<bool> noFlash{false};
+    inline std::atomic<bool> noSway{false};
+    inline std::atomic<bool> infiniteStamina{false};
+    inline std::atomic<bool> speedHack{false};
+    inline std::atomic<bool> superJump{false};
+    inline std::atomic<bool> thirdPerson{false};
+    // Values
+    inline std::atomic<float> aimbotFOV{15.0f};
+    inline std::atomic<float> aimbotSmooth{3.0f};
+    inline std::atomic<float> customFOV{120.0f};
+    inline std::atomic<float> speedMultiplier{2.0f};
+    inline std::atomic<float> jumpMultiplier{2.0f};
+    inline std::atomic<float> thirdPersonDist{300.0f};
+    inline int aimTargetIndex = -1;
+}
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -86,10 +124,11 @@ template<class T> T rpm(uint64_t addr) { T v{}; DmaRead(addr, &v, sizeof(T)); re
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static std::unordered_map<std::string, uint64_t> g_offsets;
+static std::unordered_map<std::string, std::string> g_strConfig;
 
-static void LoadOffsets(const char* path) {
+static void LoadConfig(const char* path) {
     std::ifstream f(path);
-    if (!f.is_open()) return;
+    if (!f.is_open()) { printf("[!] Could not open config: %s\n", path); return; }
     std::string line;
     while (std::getline(f, line)) {
         if (line.empty() || line[0] == '#' || line[0] == ';' || line[0] == '[') continue;
@@ -101,13 +140,21 @@ static void LoadOffsets(const char* path) {
         key.erase(0, key.find_first_not_of(" \t\r\n"));
         val.erase(val.find_last_not_of(" \t\r\n") + 1);
         val.erase(0, val.find_first_not_of(" \t\r\n"));
-        if (!key.empty()) g_offsets[key] = strtoull(val.c_str(), nullptr, 0);
+        if (key.empty()) continue;
+        g_strConfig[key] = val;
+        if (val.size() > 2 && val[0] == '0' && (val[1] == 'x' || val[1] == 'X'))
+            g_offsets[key] = strtoull(val.c_str(), nullptr, 16);
+        else if (!val.empty() && (isdigit(val[0]) || val[0] == '-'))
+            g_offsets[key] = strtoull(val.c_str(), nullptr, 0);
     }
+    printf("[+] Loaded config: %s\n", path);
 }
 
-static uint64_t Off(const char* name, uint64_t fallback = 0) {
-    auto it = g_offsets.find(name);
-    return (it != g_offsets.end()) ? it->second : fallback;
+static std::string Str(const char* key, const char* fb = "") {
+    auto it = g_strConfig.find(key); return (it != g_strConfig.end()) ? it->second : fb;
+}
+static uint64_t Off(const char* key, uint64_t fb = 0) {
+    auto it = g_offsets.find(key); return (it != g_offsets.end()) ? it->second : fb;
 }
 
 
@@ -115,55 +162,68 @@ static uint64_t Off(const char* name, uint64_t fallback = 0) {
 // UE5 Offsets
 // ═══════════════════════════════════════════════════════════════════════════════
 
-namespace Offsets {
-    uint64_t GWorld;
-    uint64_t OwningGameInstance;
-    uint64_t LocalPlayers;
-    uint64_t PlayerController;
-    uint64_t AcknowledgedPawn;
-    uint64_t PlayerCameraManager;
-    uint64_t PersistentLevel;
-    uint64_t Actors;
-    uint64_t ActorCount;
-    uint64_t RootComponent;
-    uint64_t ActorMesh;
-    uint64_t RelativeLocation;
-    uint64_t ComponentToWorld;
-    uint64_t TeamIndex;
-    uint64_t Health;
-    uint64_t MaxHealth;
-    uint64_t bIsDead;
-    uint64_t BoneArray;
-    uint64_t ComponentToWorldMatrix;
-    uint64_t CameraLocation;
-    uint64_t CameraRotation;
-    uint64_t CameraFOV;
-    uint64_t PlayerNamePrivate;
+namespace O {
+    uint64_t GWorld, OwningGameInstance, LocalPlayers, PlayerController, AcknowledgedPawn;
+    uint64_t PlayerCameraManager, PersistentLevel, Actors, ActorCount;
+    uint64_t RootComponent, ActorMesh, RelativeLocation, ComponentToWorldMatrix;
+    uint64_t TeamIndex, Health, MaxHealth, bIsDead, BoneArray;
+    uint64_t CameraLocation, CameraRotation, CameraFOV, PlayerNamePrivate;
+    // Write-target offsets
+    uint64_t GlowEnable, GlowThroughWalls, GlowColor;
+    uint64_t ControlRotation, RecoilPitch, RecoilYaw, ViewAngles;
+    uint64_t FireRate, SpreadAngle;
+    uint64_t ChamsEnable, ChamsThroughWalls, ChamsColor;
+    uint64_t FlashAlpha, FlashMaxAlpha, SwayScale;
+    uint64_t Stamina, MaxStamina, MovementSpeed, MaxWalkSpeed;
+    uint64_t JumpZVelocity, ThirdPersonOffset;
+    uint64_t DefaultMaxWalkSpeed, DefaultJumpZ;
 
     void Init() {
-        GWorld                 = Off("GWorld",                  0x0);
-        OwningGameInstance     = Off("OwningGameInstance",       0x1B8);
-        LocalPlayers           = Off("LocalPlayers",             0x38);
-        PlayerController       = Off("PlayerController",         0x30);
-        AcknowledgedPawn       = Off("AcknowledgedPawn",         0x338);
-        PlayerCameraManager    = Off("PlayerCameraManager",      0x348);
-        PersistentLevel        = Off("PersistentLevel",          0x30);
-        Actors                 = Off("Actors",                   0x98);
-        ActorCount             = Off("ActorCount",               0xA0);
-        RootComponent          = Off("RootComponent",            0x190);
-        ActorMesh              = Off("ActorMesh",                0x310);
-        RelativeLocation       = Off("RelativeLocation",         0x128);
-        ComponentToWorld       = Off("ComponentToWorld",          0x1C0);
-        TeamIndex              = Off("TeamIndex",                 0x10C);
-        Health                 = Off("Health",                    0x0);
-        MaxHealth              = Off("MaxHealth",                 0x0);
-        bIsDead                = Off("bIsDead",                   0x0);
-        BoneArray              = Off("BoneArray",                 0x5B0);
-        ComponentToWorldMatrix = Off("ComponentToWorldMatrix",    0x1C0);
-        CameraLocation         = Off("CameraLocation",            0x0);
-        CameraRotation         = Off("CameraRotation",            0x0);
-        CameraFOV              = Off("CameraFOV",                 0x0);
-        PlayerNamePrivate      = Off("PlayerNamePrivate",          0x310);
+        GWorld                 = Off("GWorld", 0x0);
+        OwningGameInstance     = Off("OwningGameInstance", 0x1B8);
+        LocalPlayers           = Off("LocalPlayers", 0x38);
+        PlayerController       = Off("PlayerController", 0x30);
+        AcknowledgedPawn       = Off("AcknowledgedPawn", 0x338);
+        PlayerCameraManager    = Off("PlayerCameraManager", 0x348);
+        PersistentLevel        = Off("PersistentLevel", 0x30);
+        Actors                 = Off("Actors", 0x98);
+        ActorCount             = Off("ActorCount", 0xA0);
+        RootComponent          = Off("RootComponent", 0x190);
+        ActorMesh              = Off("ActorMesh", 0x310);
+        RelativeLocation       = Off("RelativeLocation", 0x128);
+        ComponentToWorldMatrix = Off("ComponentToWorldMatrix", 0x1C0);
+        TeamIndex              = Off("TeamIndex", 0x10C);
+        Health                 = Off("Health", 0x0);
+        MaxHealth              = Off("MaxHealth", 0x0);
+        bIsDead                = Off("bIsDead", 0x0);
+        BoneArray              = Off("BoneArray", 0x5B0);
+        CameraLocation         = Off("CameraLocation", 0x0);
+        CameraRotation         = Off("CameraRotation", 0x0);
+        CameraFOV              = Off("CameraFOV", 0x0);
+        PlayerNamePrivate      = Off("PlayerNamePrivate", 0x0);
+        GlowEnable             = Off("GlowEnable", 0x0);
+        GlowThroughWalls       = Off("GlowThroughWalls", 0x0);
+        GlowColor              = Off("GlowColor", 0x0);
+        ControlRotation        = Off("ControlRotation", 0x0);
+        RecoilPitch            = Off("RecoilPitch", 0x0);
+        RecoilYaw              = Off("RecoilYaw", 0x0);
+        ViewAngles             = Off("ViewAngles", 0x0);
+        FireRate               = Off("FireRate", 0x0);
+        SpreadAngle            = Off("SpreadAngle", 0x0);
+        ChamsEnable            = Off("ChamsEnable", 0x0);
+        ChamsThroughWalls      = Off("ChamsThroughWalls", 0x0);
+        ChamsColor             = Off("ChamsColor", 0x0);
+        FlashAlpha             = Off("FlashAlpha", 0x0);
+        FlashMaxAlpha          = Off("FlashMaxAlpha", 0x0);
+        SwayScale              = Off("SwayScale", 0x0);
+        Stamina                = Off("Stamina", 0x0);
+        MaxStamina             = Off("MaxStamina", 0x0);
+        MovementSpeed          = Off("MovementSpeed", 0x0);
+        MaxWalkSpeed           = Off("MaxWalkSpeed", 0x0);
+        JumpZVelocity          = Off("JumpZVelocity", 0x0);
+        ThirdPersonOffset      = Off("ThirdPersonOffset", 0x0);
+        DefaultMaxWalkSpeed    = Off("DefaultMaxWalkSpeed", 0x0);
+        DefaultJumpZ           = Off("DefaultJumpZ", 0x0);
     }
 }
 
@@ -173,7 +233,6 @@ namespace Offsets {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct Vec3 { float x, y, z; };
-struct Vec2 { float x, y; };
 struct FRotator { float pitch, yaw, roll; };
 
 struct FTransform {
@@ -195,133 +254,128 @@ static float Vec3Dist(Vec3 a, Vec3 b) {
     return sqrtf(dx*dx + dy*dy + dz*dz);
 }
 
-static float Vec2Dist(float x1, float y1, float x2, float y2) {
-    float dx = x1-x2, dy = y1-y2;
-    return sqrtf(dx*dx + dy*dy);
-}
-
-static Vec3 GetBoneWorldPos(FTransform bone, FTransform compToWorld) {
-    float bx = bone.translation.x * compToWorld.scale3d.x;
-    float by = bone.translation.y * compToWorld.scale3d.y;
-    float bz = bone.translation.z * compToWorld.scale3d.z;
-    float qx = compToWorld.rotation[0], qy = compToWorld.rotation[1];
-    float qz = compToWorld.rotation[2], qw = compToWorld.rotation[3];
+static Vec3 GetBoneWorldPos(FTransform bone, FTransform ctw) {
+    float bx = bone.translation.x * ctw.scale3d.x;
+    float by = bone.translation.y * ctw.scale3d.y;
+    float bz = bone.translation.z * ctw.scale3d.z;
+    float qx = ctw.rotation[0], qy = ctw.rotation[1];
+    float qz = ctw.rotation[2], qw = ctw.rotation[3];
     float ix = qw*bx + qy*bz - qz*by;
     float iy = qw*by + qz*bx - qx*bz;
     float iz = qw*bz + qx*by - qy*bx;
     float iw = -qx*bx - qy*by - qz*bz;
     return {
-        ix*qw + iw*-qx + iy*-qz - iz*-qy + compToWorld.translation.x,
-        iy*qw + iw*-qy + iz*-qx - ix*-qz + compToWorld.translation.y,
-        iz*qw + iw*-qz + ix*-qy - iy*-qx + compToWorld.translation.z
+        ix*qw + iw*-qx + iy*-qz - iz*-qy + ctw.translation.x,
+        iy*qw + iw*-qy + iz*-qx - ix*-qz + ctw.translation.y,
+        iz*qw + iw*-qz + ix*-qy - iy*-qx + ctw.translation.z
     };
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Entity reading
+// Entity reading — UE5 GWorld chain
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static uint64_t g_base = 0;
 
 struct PlayerData {
-    Vec3     origin;
-    Vec3     headPos;
-    int      health, maxHealth;
-    int      team;
-    float    distance;
-    wchar_t  name[64];
-    bool     valid;
-};
-
-enum Bones : int {
-    BONE_HEAD = 6,
+    Vec3  origin;
+    Vec3  headPos;
+    int   health, maxHealth;
+    int   team;
+    float distance;
+    char  name[64];
+    bool  valid;
 };
 
 static int          g_localTeam = 0;
 static Vec3         g_localPos = {};
 static float        g_localYaw = 0;
 static float        g_cameraFOV = 90.0f;
-static PlayerData   g_players[100];
+static PlayerData   g_players[128];
 static int          g_playerCount = 0;
 static std::mutex   g_dataMutex;
 
-static bool IsPlayerActor(uint64_t actor) {
-    if (!actor) return false;
-    uint64_t mesh = rpm<uint64_t>(actor + Offsets::ActorMesh);
-    if (!mesh) return false;
-    uint64_t root = rpm<uint64_t>(actor + Offsets::RootComponent);
-    return root != 0;
-}
+static uint64_t g_actorPtrs[128];
+static uint64_t g_localPawn = 0;
+static uint64_t g_playerController = 0;
 
 static Vec3 GetActorLocation(uint64_t actor) {
-    uint64_t root = rpm<uint64_t>(actor + Offsets::RootComponent);
+    uint64_t root = rpm<uint64_t>(actor + O::RootComponent);
     if (!root) return {};
-    return rpm<Vec3>(root + Offsets::RelativeLocation);
+    return rpm<Vec3>(root + O::RelativeLocation);
 }
 
 static Vec3 GetBonePos(uint64_t actor, int boneId) {
-    uint64_t mesh = rpm<uint64_t>(actor + Offsets::ActorMesh);
+    uint64_t mesh = rpm<uint64_t>(actor + O::ActorMesh);
     if (!mesh) return {};
-    FTransform compToWorld = rpm<FTransform>(mesh + Offsets::ComponentToWorldMatrix);
-    uint64_t boneArray = rpm<uint64_t>(mesh + Offsets::BoneArray);
-    if (!boneArray) return {};
-    FTransform bone = rpm<FTransform>(boneArray + (uint64_t)boneId * sizeof(FTransform));
-    return GetBoneWorldPos(bone, compToWorld);
+    FTransform ctw = rpm<FTransform>(mesh + O::ComponentToWorldMatrix);
+    uint64_t boneArr = rpm<uint64_t>(mesh + O::BoneArray);
+    if (!boneArr) return {};
+    FTransform bone = rpm<FTransform>(boneArr + (uint64_t)boneId * sizeof(FTransform));
+    return GetBoneWorldPos(bone, ctw);
+}
+
+static bool IsPlayerActor(uint64_t actor) {
+    if (!actor) return false;
+    uint64_t mesh = rpm<uint64_t>(actor + O::ActorMesh);
+    if (!mesh) return false;
+    uint64_t root = rpm<uint64_t>(actor + O::RootComponent);
+    return root != 0;
 }
 
 static void ReadPlayers() {
-    uint64_t gworld = rpm<uint64_t>(g_base + Offsets::GWorld);
+    memset(g_actorPtrs, 0, sizeof(g_actorPtrs));
+
+    uint64_t gworld = rpm<uint64_t>(g_base + O::GWorld);
     if (!gworld) return;
-
-    uint64_t gameInst = rpm<uint64_t>(gworld + Offsets::OwningGameInstance);
+    uint64_t gameInst = rpm<uint64_t>(gworld + O::OwningGameInstance);
     if (!gameInst) return;
-    uint64_t localPlayersPtr = rpm<uint64_t>(gameInst + Offsets::LocalPlayers);
-    if (!localPlayersPtr) return;
-    uint64_t localPlayer = rpm<uint64_t>(localPlayersPtr);
-    if (!localPlayer) return;
-    uint64_t playerController = rpm<uint64_t>(localPlayer + Offsets::PlayerController);
-    if (!playerController) return;
-    uint64_t localPawn = rpm<uint64_t>(playerController + Offsets::AcknowledgedPawn);
+    uint64_t lpPtr = rpm<uint64_t>(gameInst + O::LocalPlayers);
+    if (!lpPtr) return;
+    uint64_t lp = rpm<uint64_t>(lpPtr);
+    if (!lp) return;
+    uint64_t pc = rpm<uint64_t>(lp + O::PlayerController);
+    if (!pc) return;
+    g_playerController = pc;
+    uint64_t localPawn = rpm<uint64_t>(pc + O::AcknowledgedPawn);
+    g_localPawn = localPawn;
 
-    uint64_t camMgr = rpm<uint64_t>(playerController + Offsets::PlayerCameraManager);
-    if (camMgr && Offsets::CameraLocation && Offsets::CameraRotation) {
-        g_localPos = rpm<Vec3>(camMgr + Offsets::CameraLocation);
-        FRotator rot = rpm<FRotator>(camMgr + Offsets::CameraRotation);
+    uint64_t camMgr = rpm<uint64_t>(pc + O::PlayerCameraManager);
+    if (camMgr && O::CameraLocation && O::CameraRotation) {
+        g_localPos = rpm<Vec3>(camMgr + O::CameraLocation);
+        FRotator rot = rpm<FRotator>(camMgr + O::CameraRotation);
         g_localYaw = rot.yaw;
-        if (Offsets::CameraFOV)
-            g_cameraFOV = rpm<float>(camMgr + Offsets::CameraFOV);
+        if (O::CameraFOV) g_cameraFOV = rpm<float>(camMgr + O::CameraFOV);
     } else if (localPawn) {
-        uint64_t root = rpm<uint64_t>(localPawn + Offsets::RootComponent);
-        if (root) g_localPos = rpm<Vec3>(root + Offsets::RelativeLocation);
+        uint64_t root = rpm<uint64_t>(localPawn + O::RootComponent);
+        if (root) g_localPos = rpm<Vec3>(root + O::RelativeLocation);
         g_localPos.z += 70.0f;
     }
 
-    if (localPawn && Offsets::TeamIndex)
-        g_localTeam = rpm<int>(localPawn + Offsets::TeamIndex);
+    if (localPawn && O::TeamIndex)
+        g_localTeam = rpm<int>(localPawn + O::TeamIndex);
 
-    uint64_t level = rpm<uint64_t>(gworld + Offsets::PersistentLevel);
+    uint64_t level = rpm<uint64_t>(gworld + O::PersistentLevel);
     if (!level) return;
-    int32_t actorCount = rpm<int32_t>(level + Offsets::ActorCount);
-    uint64_t actorArray = rpm<uint64_t>(level + Offsets::Actors);
+    int32_t actorCount = rpm<int32_t>(level + O::ActorCount);
+    uint64_t actorArray = rpm<uint64_t>(level + O::Actors);
     if (!actorArray || actorCount <= 0) return;
     if (actorCount > 10000) actorCount = 10000;
 
     int count = 0;
     const int CHUNK = 256;
-    for (int base = 0; base < actorCount && count < 100; base += CHUNK) {
-        int batch = (actorCount - base < CHUNK) ? (actorCount - base) : CHUNK;
+    for (int base = 0; base < actorCount && count < 128; base += CHUNK) {
+        int batch = min(actorCount - base, CHUNK);
         uint64_t ptrs[256] = {};
         DmaRead(actorArray + (uint64_t)base * 8, ptrs, batch * 8);
 
-        for (int i = 0; i < batch && count < 100; i++) {
+        for (int i = 0; i < batch && count < 128; i++) {
             uint64_t actor = ptrs[i];
             if (!actor || actor == localPawn) continue;
             if (!IsPlayerActor(actor)) continue;
 
-            int team = 0;
-            if (Offsets::TeamIndex)
-                team = rpm<int>(actor + Offsets::TeamIndex);
+            int team = O::TeamIndex ? rpm<int>(actor + O::TeamIndex) : 0;
             if (team == g_localTeam && team != 0) continue;
 
             Vec3 origin = GetActorLocation(actor);
@@ -330,8 +384,7 @@ static void ReadPlayers() {
             if (dist > 600.0f || dist < 0.5f) continue;
 
             bool dead = false;
-            if (Offsets::bIsDead)
-                dead = rpm<uint8_t>(actor + Offsets::bIsDead) != 0;
+            if (O::bIsDead) dead = rpm<uint8_t>(actor + O::bIsDead) != 0;
             if (dead) continue;
 
             PlayerData& p = g_players[count];
@@ -339,27 +392,30 @@ static void ReadPlayers() {
             p.team     = team;
             p.distance = dist;
 
-            if (Offsets::Health) {
-                p.health    = rpm<int>(actor + Offsets::Health);
-                p.maxHealth = Offsets::MaxHealth ? rpm<int>(actor + Offsets::MaxHealth) : 100;
+            if (O::Health) {
+                p.health    = rpm<int>(actor + O::Health);
+                p.maxHealth = O::MaxHealth ? rpm<int>(actor + O::MaxHealth) : 100;
             } else { p.health = 100; p.maxHealth = 100; }
 
-            p.headPos = GetBonePos(actor, BONE_HEAD);
+            p.headPos = GetBonePos(actor, 6);
             if (p.headPos.x == 0 && p.headPos.y == 0 && p.headPos.z == 0)
                 p.headPos = { origin.x, origin.y, origin.z + 70.0f };
 
             p.name[0] = 0;
-            if (Offsets::PlayerNamePrivate) {
-                int32_t len = rpm<int32_t>(actor + Offsets::PlayerNamePrivate);
+            if (O::PlayerNamePrivate) {
+                int32_t len = rpm<int32_t>(actor + O::PlayerNamePrivate);
                 if (len > 0 && len < 63) {
-                    uint64_t dataPtr = rpm<uint64_t>(actor + Offsets::PlayerNamePrivate + 8);
-                    if (dataPtr) DmaRead(dataPtr, p.name, len * 2);
-                    p.name[len] = 0;
+                    uint64_t dataPtr = rpm<uint64_t>(actor + O::PlayerNamePrivate + 8);
+                    if (dataPtr) {
+                        wchar_t wbuf[64] = {};
+                        DmaRead(dataPtr, wbuf, len * 2);
+                        WideCharToMultiByte(CP_ACP, 0, wbuf, len, p.name, 63, NULL, NULL);
+                    }
                 }
             }
 
             p.valid = (p.health > 0);
-            if (p.valid) count++;
+            if (p.valid) { g_actorPtrs[count] = actor; count++; }
         }
     }
     g_playerCount = count;
@@ -367,278 +423,544 @@ static void ReadPlayers() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Radar overlay — 2D top-down radar + info panel on PC2
+// DMA Write features
 // ═══════════════════════════════════════════════════════════════════════════════
 
-namespace Radar {
-    static HWND hwnd = NULL;
-    static std::atomic<bool> running{true};
-    static HFONT fontMain = NULL;
-    static HFONT fontSmall = NULL;
-    static HFONT fontTitle = NULL;
+static Vec3 CalcAngle(Vec3 src, Vec3 dst) {
+    Vec3 delta = { dst.x - src.x, dst.y - src.y, dst.z - src.z };
+    float hyp = sqrtf(delta.x*delta.x + delta.y*delta.y);
+    return { -RAD2DEG(atan2f(delta.z, hyp)), RAD2DEG(atan2f(delta.y, delta.x)), 0 };
+}
 
-    static int radarSize    = 500;
-    static float radarRange = 200.0f; // meters
+static float AngleFOV(Vec3 viewAngles, Vec3 targetAngles) {
+    float dp = targetAngles.x - viewAngles.x;
+    float dy = targetAngles.y - viewAngles.y;
+    while (dy > 180.f) dy -= 360.f;
+    while (dy < -180.f) dy += 360.f;
+    return sqrtf(dp*dp + dy*dy);
+}
 
-    static void DrawFilled(HDC hdc, int x, int y, int w, int h, COLORREF c) {
-        HBRUSH br = CreateSolidBrush(c);
-        RECT r = {x, y, x+w, y+h};
-        FillRect(hdc, &r, br); DeleteObject(br);
+static void ApplyAimbot() {
+    if (!Config::aimbot || !g_playerController) return;
+    if (!O::ControlRotation && !O::ViewAngles) return;
+
+    Vec3 camPos = g_localPos;
+    FRotator camRot = {};
+    uint64_t camMgr = rpm<uint64_t>(g_playerController + O::PlayerCameraManager);
+    if (camMgr && O::CameraRotation) camRot = rpm<FRotator>(camMgr + O::CameraRotation);
+    Vec3 viewAngles = { camRot.pitch, camRot.yaw, 0 };
+
+    int bestIdx = -1;
+    float bestFov = Config::aimbotFOV.load();
+    for (int i = 0; i < g_playerCount; i++) {
+        if (!g_players[i].valid) continue;
+        Vec3 angle = CalcAngle(camPos, g_players[i].headPos);
+        float fov = AngleFOV(viewAngles, angle);
+        if (fov < bestFov) { bestFov = fov; bestIdx = i; }
     }
+    Config::aimTargetIndex = bestIdx;
+    if (bestIdx < 0) return;
+    if (!(GetAsyncKeyState(VK_RBUTTON) & 0x8000)) return;
 
-    static void DrawCircle(HDC hdc, int cx, int cy, int r, COLORREF c, int t = 1) {
-        HPEN pen = CreatePen(PS_SOLID, t, c);
-        HPEN op = (HPEN)SelectObject(hdc, pen);
-        HBRUSH ob = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        Ellipse(hdc, cx-r, cy-r, cx+r, cy+r);
-        SelectObject(hdc, ob); SelectObject(hdc, op); DeleteObject(pen);
-    }
+    Vec3 target = CalcAngle(camPos, g_players[bestIdx].headPos);
+    float smooth = Config::aimbotSmooth.load();
+    if (smooth < 1.0f) smooth = 1.0f;
+    FRotator newRot;
+    newRot.pitch = viewAngles.x + (target.x - viewAngles.x) / smooth;
+    newRot.yaw   = viewAngles.y + (target.y - viewAngles.y) / smooth;
+    newRot.roll  = 0;
 
-    static void DrawFilledCircle(HDC hdc, int cx, int cy, int r, COLORREF c) {
-        HBRUSH br = CreateSolidBrush(c);
-        HPEN pen = CreatePen(PS_SOLID, 1, c);
-        HBRUSH ob = (HBRUSH)SelectObject(hdc, br);
-        HPEN op = (HPEN)SelectObject(hdc, pen);
-        Ellipse(hdc, cx-r, cy-r, cx+r, cy+r);
-        SelectObject(hdc, ob); SelectObject(hdc, op);
-        DeleteObject(br); DeleteObject(pen);
-    }
+    if (O::ControlRotation && g_playerController)
+        wpm(g_playerController + O::ControlRotation, newRot);
+    else if (O::ViewAngles)
+        wpm(g_base + O::ViewAngles, newRot);
+}
 
-    static void DrawLine(HDC hdc, int x1, int y1, int x2, int y2, COLORREF c, int t = 1) {
-        HPEN pen = CreatePen(PS_SOLID, t, c);
-        HPEN op = (HPEN)SelectObject(hdc, pen);
-        MoveToEx(hdc, x1, y1, NULL); LineTo(hdc, x2, y2);
-        SelectObject(hdc, op); DeleteObject(pen);
-    }
-
-    static void DrawText_(HDC hdc, int x, int y, const char* txt, COLORREF c, HFONT f = NULL) {
-        if (f) SelectObject(hdc, f);
-        SetTextColor(hdc, c); SetBkMode(hdc, TRANSPARENT);
-        TextOutA(hdc, x, y, txt, (int)strlen(txt));
-    }
-
-    static void DrawHealthBar(HDC hdc, int x, int y, int w, int h, float hp) {
-        DrawFilled(hdc, x, y, w, h, RGB(40,40,40));
-        int fillW = (int)((w-2) * hp);
-        if (fillW < 0) fillW = 0;
-        int r = (int)(255 * (1-hp));
-        int g = (int)(255 * hp);
-        DrawFilled(hdc, x+1, y+1, fillW, h-2, RGB(r,g,0));
-    }
-
-    static void RenderRadar(HDC hdc) {
-        int ww = radarSize + 260;
-        int wh = radarSize + 60;
-
-        // Background
-        DrawFilled(hdc, 0, 0, ww, wh, RGB(12, 12, 18));
-
-        int cx = 30 + radarSize / 2;
-        int cy = 30 + radarSize / 2;
-        int radius = radarSize / 2;
-
-        // Radar background
-        DrawFilledCircle(hdc, cx, cy, radius, RGB(20, 25, 20));
-
-        // Range rings
-        DrawCircle(hdc, cx, cy, radius, RGB(40, 50, 40));
-        DrawCircle(hdc, cx, cy, radius * 3/4, RGB(30, 40, 30));
-        DrawCircle(hdc, cx, cy, radius / 2, RGB(30, 40, 30));
-        DrawCircle(hdc, cx, cy, radius / 4, RGB(30, 40, 30));
-
-        // Crosshair
-        DrawLine(hdc, cx - radius, cy, cx + radius, cy, RGB(35, 45, 35));
-        DrawLine(hdc, cx, cy - radius, cx, cy + radius, RGB(35, 45, 35));
-
-        // Compass labels
-        float yawRad = DEG2RAD(g_localYaw);
-        const char* dirs[] = {"N", "E", "S", "W"};
-        float angles[] = {0, 90, 180, 270};
-        for (int i = 0; i < 4; i++) {
-            float a = DEG2RAD(angles[i]) - yawRad;
-            int lx = cx + (int)(sinf(a) * (radius + 12));
-            int ly = cy - (int)(cosf(a) * (radius + 12));
-            DrawText_(hdc, lx - 4, ly - 6, dirs[i], RGB(100, 120, 100), fontSmall);
+static void ApplyGlow() {
+    if (!Config::glow || !O::GlowEnable) return;
+    for (int i = 0; i < g_playerCount; i++) {
+        uint64_t actor = g_actorPtrs[i];
+        if (!actor) continue;
+        wpm<uint8_t>(actor + O::GlowEnable, 1);
+        if (O::GlowThroughWalls) wpm<uint8_t>(actor + O::GlowThroughWalls, 1);
+        if (O::GlowColor) {
+            float color[3] = { 1.0f, 0.0f, 0.0f };
+            DmaWrite(actor + O::GlowColor, color, sizeof(color));
         }
+    }
+}
 
-        // Range label
-        char rangeBuf[32];
-        snprintf(rangeBuf, sizeof(rangeBuf), "%.0fm", radarRange);
-        DrawText_(hdc, cx + radius - 30, cy + 4, rangeBuf, RGB(60, 80, 60), fontSmall);
+static void ApplyNoRecoil() {
+    if (!Config::noRecoil || !g_localPawn) return;
+    if (O::RecoilPitch) wpm<float>(g_localPawn + O::RecoilPitch, 0.0f);
+    if (O::RecoilYaw)   wpm<float>(g_localPawn + O::RecoilYaw, 0.0f);
+}
 
-        // Local player (center dot)
-        DrawFilledCircle(hdc, cx, cy, 5, RGB(0, 200, 255));
+static void ApplyNoSpread() {
+    if (!Config::noSpread || !O::SpreadAngle || !g_localPawn) return;
+    wpm<float>(g_localPawn + O::SpreadAngle, 0.0f);
+}
 
-        // Direction indicator (line showing where local player faces)
-        int dirLen = 18;
-        int dx = cx + (int)(sinf(0) * dirLen);  // forward is always up on radar
-        int dy = cy - (int)(cosf(0) * dirLen);
-        DrawLine(hdc, cx, cy, dx, dy, RGB(0, 200, 255), 2);
+static void ApplyRapidFire() {
+    if (!Config::rapidFire || !O::FireRate || !g_localPawn) return;
+    wpm<float>(g_localPawn + O::FireRate, 0.0f);
+}
 
-        // Enemy dots
+static void ApplyFOV() {
+    if (!Config::fovChanger || !O::CameraFOV || !g_playerController) return;
+    uint64_t camMgr = rpm<uint64_t>(g_playerController + O::PlayerCameraManager);
+    if (camMgr) wpm<float>(camMgr + O::CameraFOV, Config::customFOV.load());
+}
+
+static void ApplyTriggerbot() {
+    if (!Config::triggerbot || Config::aimTargetIndex < 0) return;
+    float dist = g_players[Config::aimTargetIndex].distance;
+    if (dist > 200.0f) return;
+    Vec3 target = CalcAngle(g_localPos, g_players[Config::aimTargetIndex].headPos);
+    FRotator camRot = {};
+    if (g_playerController) {
+        uint64_t camMgr = rpm<uint64_t>(g_playerController + O::PlayerCameraManager);
+        if (camMgr && O::CameraRotation) camRot = rpm<FRotator>(camMgr + O::CameraRotation);
+    }
+    Vec3 view = { camRot.pitch, camRot.yaw, 0 };
+    if (AngleFOV(view, target) < 2.0f) {
+        INPUT input = {}; input.type = INPUT_MOUSE;
+        input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        SendInput(1, &input, sizeof(INPUT));
+        Sleep(30);
+        input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        SendInput(1, &input, sizeof(INPUT));
+    }
+}
+
+static void ApplyChams() {
+    if (!Config::chams || !O::ChamsEnable) return;
+    for (int i = 0; i < g_playerCount; i++) {
+        uint64_t actor = g_actorPtrs[i];
+        if (!actor) continue;
+        wpm<uint8_t>(actor + O::ChamsEnable, 1);
+        if (O::ChamsThroughWalls) wpm<uint8_t>(actor + O::ChamsThroughWalls, 1);
+        if (O::ChamsColor) { float c[3]={1,0,0}; DmaWrite(actor+O::ChamsColor,c,12); }
+    }
+}
+
+static void ApplyNoFlash() {
+    if (!Config::noFlash || !g_localPawn) return;
+    if (O::FlashAlpha) wpm<float>(g_localPawn + O::FlashAlpha, 0.0f);
+    if (O::FlashMaxAlpha) wpm<float>(g_localPawn + O::FlashMaxAlpha, 0.0f);
+}
+
+static void ApplyNoSway() {
+    if (!Config::noSway || !g_localPawn || !O::SwayScale) return;
+    wpm<float>(g_localPawn + O::SwayScale, 0.0f);
+}
+
+static void ApplyInfiniteStamina() {
+    if (!Config::infiniteStamina || !g_localPawn) return;
+    if (O::Stamina && O::MaxStamina) {
+        float mx = rpm<float>(g_localPawn + O::MaxStamina);
+        if (mx > 0) wpm<float>(g_localPawn + O::Stamina, mx);
+    }
+}
+
+static void ApplySpeedHack() {
+    if (!Config::speedHack || !g_localPawn) return;
+    if (!O::MaxWalkSpeed && !O::MovementSpeed) return;
+    float base = O::DefaultMaxWalkSpeed ? rpm<float>(g_localPawn + O::DefaultMaxWalkSpeed) : 600.0f;
+    float target = base * Config::speedMultiplier.load();
+    if (O::MaxWalkSpeed) wpm<float>(g_localPawn + O::MaxWalkSpeed, target);
+    if (O::MovementSpeed) wpm<float>(g_localPawn + O::MovementSpeed, target);
+}
+
+static void ApplySuperJump() {
+    if (!Config::superJump || !g_localPawn || !O::JumpZVelocity) return;
+    float base = O::DefaultJumpZ ? rpm<float>(g_localPawn + O::DefaultJumpZ) : 420.0f;
+    wpm<float>(g_localPawn + O::JumpZVelocity, base * Config::jumpMultiplier.load());
+}
+
+static void ApplyThirdPerson() {
+    if (!Config::thirdPerson || !g_playerController || !O::ThirdPersonOffset) return;
+    uint64_t camMgr = rpm<uint64_t>(g_playerController + O::PlayerCameraManager);
+    if (camMgr) wpm<float>(camMgr + O::ThirdPersonOffset, Config::thirdPersonDist.load());
+}
+
+static void ApplyFeatures() {
+    ApplyAimbot();
+    ApplyGlow();
+    ApplyChams();
+    ApplyNoRecoil();
+    ApplyNoSpread();
+    ApplyRapidFire();
+    ApplyFOV();
+    ApplyTriggerbot();
+    ApplyNoFlash();
+    ApplyNoSway();
+    ApplyInfiniteStamina();
+    ApplySpeedHack();
+    ApplySuperJump();
+    ApplyThirdPerson();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Web menu — HTTP server with radar + feature toggles
+// ═══════════════════════════════════════════════════════════════════════════════
+
+namespace WebMenu {
+    static int port = 8888;
+    static std::atomic<bool> running{true};
+
+    static std::string BuildJSON() {
         std::lock_guard<std::mutex> lock(g_dataMutex);
-
+        std::ostringstream js;
+        js << "{\"game\":\"Delta Force\","
+           << "\"count\":" << g_playerCount << ","
+           << "\"range\":200,"
+           << "\"local\":{\"x\":" << g_localPos.x << ",\"y\":" << g_localPos.y
+           << ",\"z\":" << g_localPos.z << ",\"yaw\":" << g_localYaw
+           << ",\"team\":" << g_localTeam << "},"
+           << "\"scale\":100,"
+           << "\"cfg\":{"
+           << "\"aimbot\":" << (Config::aimbot?"true":"false") << ","
+           << "\"triggerbot\":" << (Config::triggerbot?"true":"false") << ","
+           << "\"noRecoil\":" << (Config::noRecoil?"true":"false") << ","
+           << "\"noSpread\":" << (Config::noSpread?"true":"false") << ","
+           << "\"rapidFire\":" << (Config::rapidFire?"true":"false") << ","
+           << "\"glow\":" << (Config::glow?"true":"false") << ","
+           << "\"chams\":" << (Config::chams?"true":"false") << ","
+           << "\"fovChanger\":" << (Config::fovChanger?"true":"false") << ","
+           << "\"radar\":" << (Config::radar?"true":"false") << ","
+           << "\"espBox\":" << (Config::espBox?"true":"false") << ","
+           << "\"espName\":" << (Config::espName?"true":"false") << ","
+           << "\"espHealth\":" << (Config::espHealth?"true":"false") << ","
+           << "\"espDistance\":" << (Config::espDistance?"true":"false") << ","
+           << "\"espSkeleton\":" << (Config::espSkeleton?"true":"false") << ","
+           << "\"espSnaplines\":" << (Config::espSnaplines?"true":"false") << ","
+           << "\"noFlash\":" << (Config::noFlash?"true":"false") << ","
+           << "\"noSway\":" << (Config::noSway?"true":"false") << ","
+           << "\"infiniteStamina\":" << (Config::infiniteStamina?"true":"false") << ","
+           << "\"speedHack\":" << (Config::speedHack?"true":"false") << ","
+           << "\"superJump\":" << (Config::superJump?"true":"false") << ","
+           << "\"thirdPerson\":" << (Config::thirdPerson?"true":"false") << ","
+           << "\"aimbotFOV\":" << Config::aimbotFOV.load() << ","
+           << "\"aimbotSmooth\":" << Config::aimbotSmooth.load() << ","
+           << "\"customFOV\":" << Config::customFOV.load() << ","
+           << "\"speedMultiplier\":" << Config::speedMultiplier.load() << ","
+           << "\"jumpMultiplier\":" << Config::jumpMultiplier.load() << ","
+           << "\"thirdPersonDist\":" << Config::thirdPersonDist.load()
+           << "},"
+           << "\"players\":[";
         for (int i = 0; i < g_playerCount; i++) {
             auto& p = g_players[i];
             if (!p.valid) continue;
-
-            // World-space delta from local player
-            float wx = (p.origin.x - g_localPos.x) / 100.0f; // UE5 cm -> m
-            float wy = (p.origin.y - g_localPos.y) / 100.0f;
-
-            // Rotate by negative local yaw so radar is north-up relative to player facing
-            float a = -DEG2RAD(g_localYaw);
-            float rx = wx * cosf(a) - wy * sinf(a);
-            float ry = wx * sinf(a) + wy * cosf(a);
-
-            // Scale to radar pixel space
-            float scale = (float)radius / radarRange;
-            int px = cx + (int)(rx * scale);
-            int py = cy - (int)(ry * scale);
-
-            // Clamp to radar circle
-            float distFromCenter = Vec2Dist((float)px, (float)py, (float)cx, (float)cy);
-            if (distFromCenter > radius - 4) {
-                float ang = atan2f((float)(px - cx), (float)(cy - py));
-                px = cx + (int)(sinf(ang) * (radius - 4));
-                py = cy - (int)(cosf(ang) * (radius - 4));
+            if (i > 0) js << ",";
+            js << "{\"x\":" << p.origin.x << ",\"y\":" << p.origin.y
+               << ",\"z\":" << p.origin.z << ",\"hp\":" << p.health
+               << ",\"mhp\":" << p.maxHealth << ",\"t\":" << p.team
+               << ",\"d\":" << (int)p.distance;
+            if (p.name[0]) {
+                js << ",\"n\":\"";
+                for (const char* c = p.name; *c; c++) {
+                    if (*c == '"') js << "\\\"";
+                    else if (*c == '\\') js << "\\\\";
+                    else js << *c;
+                }
+                js << "\"";
             }
-
-            // Color: red for enemy, yellow if low HP
-            float hpPct = (p.maxHealth > 0) ? (float)p.health / p.maxHealth : 1.0f;
-            COLORREF dotCol = (hpPct < 0.3f) ? RGB(255, 255, 0) : RGB(255, 50, 50);
-
-            int dotSize = (p.distance < 50.0f) ? 6 : (p.distance < 150.0f) ? 5 : 4;
-            DrawFilledCircle(hdc, px, py, dotSize, dotCol);
-
-            // Distance label near dot
-            char distTxt[16];
-            snprintf(distTxt, sizeof(distTxt), "%.0f", p.distance);
-            DrawText_(hdc, px + dotSize + 2, py - 5, distTxt, RGB(180, 180, 180), fontSmall);
+            js << "}";
         }
-
-        // ── Info panel (right side) ──
-        int panelX = radarSize + 50;
-        int panelY = 20;
-
-        char title[64];
-        snprintf(title, sizeof(title), "DELTA FORCE DMA");
-        DrawText_(hdc, panelX, panelY, title, RGB(255, 160, 50), fontTitle);
-        panelY += 24;
-
-        char status[128];
-        snprintf(status, sizeof(status), "Enemies: %d  |  Range: %.0fm", g_playerCount, radarRange);
-        DrawText_(hdc, panelX, panelY, status, RGB(180, 180, 180), fontMain);
-        panelY += 20;
-
-        DrawLine(hdc, panelX, panelY, panelX + 210, panelY, RGB(50, 50, 50));
-        panelY += 8;
-
-        // Player list
-        for (int i = 0; i < g_playerCount && i < 16; i++) {
-            auto& p = g_players[i];
-            if (!p.valid) continue;
-
-            COLORREF nameCol = RGB(255, 100, 100);
-
-            // Name or "Enemy"
-            char nameBuf[128] = "Enemy";
-            if (p.name[0])
-                WideCharToMultiByte(CP_ACP, 0, p.name, -1, nameBuf, 127, NULL, NULL);
-
-            char line[256];
-            snprintf(line, sizeof(line), "%s  %.0fm  %dHP", nameBuf, p.distance, p.health);
-            DrawText_(hdc, panelX, panelY, line, nameCol, fontSmall);
-            panelY += 14;
-
-            // Mini health bar
-            float hp = (p.maxHealth > 0) ? (float)p.health / p.maxHealth : 1.0f;
-            DrawHealthBar(hdc, panelX, panelY, 120, 6, hp);
-            panelY += 12;
-        }
-
-        // Controls
-        panelY = wh - 60;
-        DrawText_(hdc, panelX, panelY, "PgUp/PgDn: Range", RGB(100, 100, 100), fontSmall);
-        panelY += 14;
-        DrawText_(hdc, panelX, panelY, "END: Exit", RGB(100, 100, 100), fontSmall);
+        js << "]}";
+        return js.str();
     }
 
-    LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
-        if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
-        if (msg == WM_KEYDOWN) {
-            if (wp == VK_END) { running = false; PostQuitMessage(0); return 0; }
-            if (wp == VK_PRIOR) { radarRange = min(radarRange + 50.0f, 800.0f); return 0; }
-            if (wp == VK_NEXT) { radarRange = max(radarRange - 50.0f, 50.0f); return 0; }
-        }
-        return DefWindowProcA(h, msg, wp, lp);
+    static void HandleToggle(const char* body) {
+        auto getVal = [&](const char* key) -> std::string {
+            const char* p = strstr(body, key);
+            if (!p) return "";
+            p += strlen(key);
+            if (*p != '=') return "";
+            p++;
+            const char* end = strchr(p, '&');
+            return end ? std::string(p, end) : std::string(p);
+        };
+        std::string k = getVal("key");
+        std::string v = getVal("val");
+        if (k.empty()) return;
+        bool bv = (v == "true" || v == "1");
+        float fv = (float)atof(v.c_str());
+        if (k == "aimbot")            Config::aimbot = bv;
+        else if (k == "triggerbot")   Config::triggerbot = bv;
+        else if (k == "noRecoil")     Config::noRecoil = bv;
+        else if (k == "noSpread")     Config::noSpread = bv;
+        else if (k == "rapidFire")    Config::rapidFire = bv;
+        else if (k == "glow")         Config::glow = bv;
+        else if (k == "chams")        Config::chams = bv;
+        else if (k == "fovChanger")   Config::fovChanger = bv;
+        else if (k == "radar")        Config::radar = bv;
+        else if (k == "espBox")       Config::espBox = bv;
+        else if (k == "espName")      Config::espName = bv;
+        else if (k == "espHealth")    Config::espHealth = bv;
+        else if (k == "espDistance")  Config::espDistance = bv;
+        else if (k == "espSkeleton")  Config::espSkeleton = bv;
+        else if (k == "espSnaplines") Config::espSnaplines = bv;
+        else if (k == "noFlash")      Config::noFlash = bv;
+        else if (k == "noSway")       Config::noSway = bv;
+        else if (k == "infiniteStamina") Config::infiniteStamina = bv;
+        else if (k == "speedHack")    Config::speedHack = bv;
+        else if (k == "superJump")    Config::superJump = bv;
+        else if (k == "thirdPerson")  Config::thirdPerson = bv;
+        else if (k == "aimbotFOV")    Config::aimbotFOV = fv;
+        else if (k == "aimbotSmooth") Config::aimbotSmooth = fv;
+        else if (k == "customFOV")    Config::customFOV = fv;
+        else if (k == "speedMultiplier")   Config::speedMultiplier = fv;
+        else if (k == "jumpMultiplier")    Config::jumpMultiplier = fv;
+        else if (k == "thirdPersonDist")   Config::thirdPersonDist = fv;
     }
 
-    void Run() {
-        WNDCLASSEXA wc = {};
-        wc.cbSize = sizeof(wc);
-        wc.style = CS_HREDRAW | CS_VREDRAW;
-        wc.lpfnWndProc = WndProc;
-        wc.hInstance = GetModuleHandle(NULL);
-        wc.lpszClassName = "DfDmaRadar";
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-        RegisterClassExA(&wc);
+    static const char* HTML_PAGE = R"HTML(<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Delta Force DMA</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0c0c12;color:#b4b4b4;font-family:'Consolas','Courier New',monospace;overflow-x:hidden}
+#wrap{display:flex;height:100vh;width:100vw}
+#radar-box{flex:1;display:flex;align-items:center;justify-content:center;min-width:0}
+canvas{display:block;border-radius:50%}
+#panel{width:320px;padding:16px;overflow-y:auto;background:#10101a;border-left:1px solid #222}
+#title{font-size:18px;font-weight:bold;margin-bottom:4px}
+#status{font-size:12px;color:#888;margin-bottom:8px}
+.sep{height:1px;background:#333;margin:10px 0}
+.cat{font-size:13px;color:#ff9040;font-weight:bold;margin:10px 0 6px 0;text-transform:uppercase;letter-spacing:1px}
+.row{display:flex;align-items:center;justify-content:space-between;padding:4px 0}
+.row label{font-size:12px;flex:1}
+.tog{width:40px;height:20px;border-radius:10px;background:#333;cursor:pointer;position:relative;transition:.2s}
+.tog.on{background:#ff4040}
+.tog::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#888;transition:.2s}
+.tog.on::after{left:22px;background:#fff}
+.sld{display:flex;align-items:center;padding:2px 0 6px 0}
+.sld label{font-size:11px;width:100px}
+.sld input[type=range]{flex:1;accent-color:#ff4040}
+.sld .val{font-size:11px;width:40px;text-align:right;color:#ff9040}
+.enemy{font-size:11px;color:#ff7878;margin-bottom:2px}
+.hpbar{height:3px;background:#282828;margin-bottom:6px;border-radius:2px}
+.hpbar div{height:100%;border-radius:2px}
+#plist{max-height:200px;overflow-y:auto}
+#conn{font-size:10px;color:#444;margin-top:8px}
+@media(max-width:700px){
+  #wrap{flex-direction:column}
+  #panel{width:100%;max-height:50vh;border-left:none;border-top:1px solid #222}
+  #radar-box{height:50vh}
+}
+</style>
+</head><body>
+<div id="wrap">
+<div id="radar-box"><canvas id="c"></canvas></div>
+<div id="panel">
+  <div id="title">DELTA FORCE DMA</div>
+  <div id="status">Connecting...</div>
+  <div class="sep"></div>
+  <div class="cat">Combat</div>
+  <div class="row"><label>Aimbot</label><div class="tog" data-key="aimbot" onclick="tog(this)"></div></div>
+  <div class="sld"><label>Aim FOV</label><input type="range" min="1" max="90" value="15" data-key="aimbotFOV" oninput="sld(this)"><span class="val">15</span></div>
+  <div class="sld"><label>Smoothing</label><input type="range" min="1" max="20" value="3" data-key="aimbotSmooth" oninput="sld(this)"><span class="val">3</span></div>
+  <div class="row"><label>Triggerbot</label><div class="tog" data-key="triggerbot" onclick="tog(this)"></div></div>
+  <div class="row"><label>No Recoil</label><div class="tog" data-key="noRecoil" onclick="tog(this)"></div></div>
+  <div class="row"><label>No Spread</label><div class="tog" data-key="noSpread" onclick="tog(this)"></div></div>
+  <div class="row"><label>Rapid Fire</label><div class="tog" data-key="rapidFire" onclick="tog(this)"></div></div>
+  <div class="cat">ESP</div>
+  <div class="row"><label>Box ESP</label><div class="tog" data-key="espBox" onclick="tog(this)"></div></div>
+  <div class="row"><label>Name ESP</label><div class="tog" data-key="espName" onclick="tog(this)"></div></div>
+  <div class="row"><label>Health Bars</label><div class="tog" data-key="espHealth" onclick="tog(this)"></div></div>
+  <div class="row"><label>Distance</label><div class="tog" data-key="espDistance" onclick="tog(this)"></div></div>
+  <div class="row"><label>Skeleton</label><div class="tog" data-key="espSkeleton" onclick="tog(this)"></div></div>
+  <div class="row"><label>Snaplines</label><div class="tog" data-key="espSnaplines" onclick="tog(this)"></div></div>
+  <div class="row"><label>Glow</label><div class="tog" data-key="glow" onclick="tog(this)"></div></div>
+  <div class="row"><label>Chams</label><div class="tog" data-key="chams" onclick="tog(this)"></div></div>
+  <div class="cat">Visuals</div>
+  <div class="row"><label>Radar</label><div class="tog on" data-key="radar" onclick="tog(this)"></div></div>
+  <div class="row"><label>FOV Changer</label><div class="tog" data-key="fovChanger" onclick="tog(this)"></div></div>
+  <div class="sld"><label>Custom FOV</label><input type="range" min="60" max="160" value="120" data-key="customFOV" oninput="sld(this)"><span class="val">120</span></div>
+  <div class="row"><label>Third Person</label><div class="tog" data-key="thirdPerson" onclick="tog(this)"></div></div>
+  <div class="sld"><label>TP Distance</label><input type="range" min="100" max="800" value="300" data-key="thirdPersonDist" oninput="sld(this)"><span class="val">300</span></div>
+  <div class="cat">Misc</div>
+  <div class="row"><label>No Flash</label><div class="tog" data-key="noFlash" onclick="tog(this)"></div></div>
+  <div class="row"><label>No Sway</label><div class="tog" data-key="noSway" onclick="tog(this)"></div></div>
+  <div class="row"><label>Infinite Stamina</label><div class="tog" data-key="infiniteStamina" onclick="tog(this)"></div></div>
+  <div class="row"><label>Speed Hack</label><div class="tog" data-key="speedHack" onclick="tog(this)"></div></div>
+  <div class="sld"><label>Speed Multi</label><input type="range" min="1" max="10" value="2" data-key="speedMultiplier" oninput="sld(this)"><span class="val">2</span></div>
+  <div class="row"><label>Super Jump</label><div class="tog" data-key="superJump" onclick="tog(this)"></div></div>
+  <div class="sld"><label>Jump Multi</label><input type="range" min="1" max="10" value="2" data-key="jumpMultiplier" oninput="sld(this)"><span class="val">2</span></div>
+  <div class="sep"></div>
+  <div id="plist"></div>
+  <div id="conn"></div>
+</div>
+</div>
+<script>
+const C=document.getElementById('c'),X=C.getContext('2d');
+let D={game:'',count:0,range:200,local:{x:0,y:0,z:0,yaw:0,team:0},scale:100,players:[],cfg:{}};
+let range=200,fails=0;
 
-        int ww = radarSize + 260;
-        int wh = radarSize + 60;
+function tog(el){
+  const on=!el.classList.contains('on');
+  el.classList.toggle('on',on);
+  fetch('/api/set',{method:'POST',body:'key='+el.dataset.key+'&val='+(on?'true':'false')});
+}
+function sld(el){
+  el.nextElementSibling.textContent=el.value;
+  fetch('/api/set',{method:'POST',body:'key='+el.dataset.key+'&val='+el.value});
+}
 
-        hwnd = CreateWindowExA(
-            WS_EX_TOPMOST, "DfDmaRadar", "Delta Force DMA Radar",
-            WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
-            100, 100, ww, wh,
-            NULL, NULL, GetModuleHandle(NULL), NULL);
+function syncUI(cfg){
+  if(!cfg)return;
+  document.querySelectorAll('.tog').forEach(t=>{
+    const v=cfg[t.dataset.key];if(v!==undefined)t.classList.toggle('on',v);
+  });
+  document.querySelectorAll('.sld input[type=range]').forEach(s=>{
+    const v=cfg[s.dataset.key];if(v!==undefined){s.value=v;s.nextElementSibling.textContent=Math.round(v)}
+  });
+}
 
-        ShowWindow(hwnd, SW_SHOW);
-        UpdateWindow(hwnd);
+function sz(){
+  const b=document.getElementById('radar-box');
+  const s=Math.min(b.clientWidth,b.clientHeight)-20;
+  const dpr=window.devicePixelRatio||1;
+  C.width=s*dpr;C.height=s*dpr;C.style.width=s+'px';C.style.height=s+'px';
+  X.setTransform(dpr,0,0,dpr,0,0);return s;
+}
+window.addEventListener('resize',()=>sz());
+function deg2rad(d){return d*Math.PI/180}
 
-        fontMain  = CreateFontA(14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Consolas");
-        fontSmall = CreateFontA(11, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Consolas");
-        fontTitle = CreateFontA(16, 0, 0, 0, FW_BOLD,   0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Consolas");
+function draw(){
+  const s=sz(),cx=s/2,cy=s/2,r=s/2-10;
+  X.clearRect(0,0,s,s);
+  X.beginPath();X.arc(cx,cy,r,0,Math.PI*2);X.fillStyle='#141a14';X.fill();
+  for(let f of[1,.75,.5,.25]){X.beginPath();X.arc(cx,cy,r*f,0,Math.PI*2);X.strokeStyle='#1e281e';X.lineWidth=1;X.stroke()}
+  X.beginPath();X.moveTo(cx-r,cy);X.lineTo(cx+r,cy);X.moveTo(cx,cy-r);X.lineTo(cx,cy+r);X.strokeStyle='#232d23';X.stroke();
+  const yaw=deg2rad(D.local.yaw||0);
+  const dirs=['N','E','S','W'],angs=[0,90,180,270];
+  X.font='11px Consolas';X.fillStyle='#647864';X.textAlign='center';X.textBaseline='middle';
+  for(let i=0;i<4;i++){const a=deg2rad(angs[i])-yaw;X.fillText(dirs[i],cx+Math.sin(a)*(r+14),cy-Math.cos(a)*(r+14))}
+  X.font='10px Consolas';X.fillStyle='#3c503c';X.textAlign='right';X.fillText(range+'m',cx+r-4,cy+14);
+  X.beginPath();X.arc(cx,cy,5,0,Math.PI*2);X.fillStyle='#00c8ff';X.fill();
+  X.beginPath();X.moveTo(cx,cy);X.lineTo(cx,cy-16);X.strokeStyle='#00c8ff';X.lineWidth=2;X.stroke();
+  const sc=D.scale||100;const cfg=D.cfg||{};
+  for(const p of D.players){
+    let wx=(p.x-D.local.x)/sc,wy=(p.y-D.local.y)/sc;
+    const a=-yaw,rx=wx*Math.cos(a)-wy*Math.sin(a),ry=wx*Math.sin(a)+wy*Math.cos(a);
+    const scale=r/range;let px=cx+rx*scale,py=cy-ry*scale;
+    const dd=Math.sqrt((px-cx)**2+(py-cy)**2);
+    if(dd>r-4){const ang=Math.atan2(px-cx,cy-py);px=cx+Math.sin(ang)*(r-4);py=cy-Math.cos(ang)*(r-4)}
+    const hpp=p.mhp>0?p.hp/p.mhp:1,col=hpp<.3?'#ffff00':'#ff3232',ds=p.d<50?6:p.d<150?5:4;
+    if(cfg.espSnaplines){X.beginPath();X.moveTo(cx,cy);X.lineTo(px,py);X.strokeStyle='rgba(255,50,50,0.3)';X.lineWidth=1;X.stroke()}
+    if(cfg.espBox){const bw=Math.max(8,20-p.d/20),bh=bw*2.2;X.strokeStyle=col;X.lineWidth=1;X.strokeRect(px-bw/2,py-bh/2,bw,bh)}
+    X.beginPath();X.arc(px,py,ds,0,Math.PI*2);X.fillStyle=col;X.fill();
+    let ty=py-ds-4;X.font='9px Consolas';X.textAlign='center';X.textBaseline='bottom';
+    if(cfg.espName){const nm=p.n||'Enemy';X.fillStyle='#fff';X.fillText(nm,px,ty);ty-=10}
+    if(cfg.espHealth){X.fillStyle=col;X.fillText(p.hp+'/'+p.mhp,px,ty);ty-=10}
+    if(cfg.espDistance){X.fillStyle='#aaa';X.fillText(Math.round(p.d)+'m',px,ty);ty-=10}
+    if(cfg.espHealth){const bw=Math.max(12,24-p.d/15);X.fillStyle='#333';X.fillRect(px-bw/2,py+ds+2,bw,3);const cr2=Math.round(255*(1-hpp)),cg2=Math.round(255*hpp);X.fillStyle='rgb('+cr2+','+cg2+',0)';X.fillRect(px-bw/2,py+ds+2,bw*hpp,3)}
+    if(!cfg.espDistance){X.font='10px Consolas';X.fillStyle='#b4b4b4';X.textAlign='left';X.textBaseline='middle';X.fillText(Math.round(p.d)+'',px+ds+3,py)}
+  }
+  requestAnimationFrame(draw);
+}
 
-        HDC memDC = NULL;
-        HBITMAP memBmp = NULL, memOld = NULL;
+async function poll(){
+  try{
+    const r=await fetch('/api/data');if(!r.ok)throw 0;
+    D=await r.json();range=D.range||range;fails=0;
+    document.getElementById('title').textContent=(D.game||'DMA')+' DMA';
+    document.getElementById('status').textContent='Enemies: '+D.count+'  Range: '+range+'m';
+    document.getElementById('conn').textContent='Connected';document.getElementById('conn').style.color='#4a4';
+    syncUI(D.cfg);
+    const pl=document.getElementById('plist');let h='';
+    for(const p of D.players.slice(0,16)){
+      const nm=p.n||'Enemy',hpp=p.mhp>0?p.hp/p.mhp:1;
+      const cr=Math.round(255*(1-hpp)),cg=Math.round(255*hpp);
+      h+='<div class="enemy">'+nm+'  '+Math.round(p.d)+'m  '+p.hp+'HP</div>';
+      h+='<div class="hpbar"><div style="width:'+Math.round(hpp*100)+'%;background:rgb('+cr+','+cg+',0)"></div></div>';
+    }
+    pl.innerHTML=h;
+  }catch(e){fails++;document.getElementById('conn').textContent='Disconnected ('+fails+')';document.getElementById('conn').style.color='#a44'}
+  setTimeout(poll,100);
+}
+draw();poll();
+</script>
+</body></html>)HTML";
 
-        MSG msg;
+    static void HandleClient(SOCKET client) {
+        char buf[8192];
+        int n = recv(client, buf, sizeof(buf)-1, 0);
+        if (n <= 0) { closesocket(client); return; }
+        buf[n] = 0;
+
+        std::string response;
+        if (strstr(buf, "POST /api/set")) {
+            char* body = strstr(buf, "\r\n\r\n");
+            if (body) { body += 4; HandleToggle(body); }
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+                       "Access-Control-Allow-Origin: *\r\nContent-Length: 2\r\n"
+                       "Connection: close\r\n\r\nOK";
+        } else if (strstr(buf, "GET /api/data")) {
+            std::string json = BuildJSON();
+            response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                       "Access-Control-Allow-Origin: *\r\nCache-Control: no-cache\r\n"
+                       "Content-Length: " + std::to_string(json.size()) + "\r\n"
+                       "Connection: close\r\n\r\n" + json;
+        } else if (strstr(buf, "GET / ") || strstr(buf, "GET / HTTP") ||
+                   strstr(buf, "GET /index") || strstr(buf, "GET /menu")) {
+            std::string body = HTML_PAGE;
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                       "Cache-Control: no-cache\r\n"
+                       "Content-Length: " + std::to_string(body.size()) + "\r\n"
+                       "Connection: close\r\n\r\n" + body;
+        } else {
+            response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        }
+        send(client, response.c_str(), (int)response.size(), 0);
+        closesocket(client);
+    }
+
+    static void ServerThread() {
+        WSADATA wsa; WSAStartup(MAKEWORD(2,2), &wsa);
+        SOCKET srv = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (srv == INVALID_SOCKET) { printf("[!] Web: socket() failed\n"); return; }
+        int opt = 1; setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt));
+        sockaddr_in addr = {}; addr.sin_family = AF_INET; addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons((u_short)port);
+        if (bind(srv, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            port++;
+            addr.sin_port = htons((u_short)port);
+            if (bind(srv, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+                printf("[!] Web: bind failed\n"); closesocket(srv); return;
+            }
+        }
+        listen(srv, 16);
+        char hostname[256]; gethostname(hostname, sizeof(hostname));
+        addrinfo hints = {}, *res = nullptr; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo(hostname, nullptr, &hints, &res) == 0) {
+            printf("[+] Web menu URLs:\n");
+            for (auto* p = res; p; p = p->ai_next) {
+                char ip[64]; inet_ntop(AF_INET, &((sockaddr_in*)p->ai_addr)->sin_addr, ip, sizeof(ip));
+                printf("    http://%s:%d\n", ip, port);
+            }
+            freeaddrinfo(res);
+        }
+        printf("    http://localhost:%d\n", port);
+        fd_set readfds; timeval tv;
         while (running) {
-            while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
-                if (msg.message == WM_QUIT) { running = false; break; }
-                TranslateMessage(&msg); DispatchMessageA(&msg);
+            FD_ZERO(&readfds); FD_SET(srv, &readfds);
+            tv.tv_sec = 1; tv.tv_usec = 0;
+            if (select(0, &readfds, nullptr, nullptr, &tv) > 0) {
+                SOCKET client = accept(srv, nullptr, nullptr);
+                if (client != INVALID_SOCKET) std::thread(HandleClient, client).detach();
             }
-            if (!running) break;
-
-            RECT cr;
-            GetClientRect(hwnd, &cr);
-            int cw = cr.right, ch = cr.bottom;
-            if (cw < 1 || ch < 1) { Sleep(100); continue; }
-
-            HDC hdc = GetDC(hwnd);
-            if (!memDC) memDC = CreateCompatibleDC(hdc);
-
-            if (memBmp) { SelectObject(memDC, memOld); DeleteObject(memBmp); }
-            memBmp = CreateCompatibleBitmap(hdc, cw, ch);
-            memOld = (HBITMAP)SelectObject(memDC, memBmp);
-
-            RenderRadar(memDC);
-            BitBlt(hdc, 0, 0, cw, ch, memDC, 0, 0, SRCCOPY);
-            ReleaseDC(hwnd, hdc);
-
-            Sleep(16); // ~60 fps
         }
-
-        if (memBmp) { SelectObject(memDC, memOld); DeleteObject(memBmp); }
-        if (memDC) DeleteDC(memDC);
-        if (fontMain) DeleteObject(fontMain);
-        if (fontSmall) DeleteObject(fontSmall);
-        if (fontTitle) DeleteObject(fontTitle);
-        DestroyWindow(hwnd);
-        UnregisterClassA("DfDmaRadar", GetModuleHandle(NULL));
+        closesocket(srv); WSACleanup();
     }
+
+    static void Start() { std::thread(ServerThread).detach(); }
 }
 
 
@@ -651,114 +973,79 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     freopen("CONOUT$", "w", stdout);
     freopen("CONOUT$", "w", stderr);
 
-    printf("=== Delta Force DMA Radar ===\n\n");
+    printf("=== Delta Force DMA Cheat ===\n\n");
 
-    // Parse command line
     std::string offsetsPath = "df_offsets.ini";
     std::string device = "fpga";
     std::string processName = "DeltaForce.exe";
     std::string moduleName = "DeltaForce.exe";
 
-    // Simple cmdline parse
     char* cmd = lpCmdLine;
     while (cmd && *cmd) {
         while (*cmd == ' ') cmd++;
         if (strncmp(cmd, "--offsets=", 9) == 0) {
-            cmd += 9;
-            char* end = strchr(cmd, ' ');
+            cmd += 9; char* end = strchr(cmd, ' ');
             offsetsPath = end ? std::string(cmd, end) : std::string(cmd);
             cmd = end ? end : cmd + strlen(cmd);
         } else if (strncmp(cmd, "--device=", 9) == 0) {
-            cmd += 9;
-            char* end = strchr(cmd, ' ');
+            cmd += 9; char* end = strchr(cmd, ' ');
             device = end ? std::string(cmd, end) : std::string(cmd);
             cmd = end ? end : cmd + strlen(cmd);
-        } else if (strncmp(cmd, "--proc=", 7) == 0) {
-            cmd += 7;
-            char* end = strchr(cmd, ' ');
-            processName = end ? std::string(cmd, end) : std::string(cmd);
-            cmd = end ? end : cmd + strlen(cmd);
-        } else {
-            cmd++;
-        }
+        } else if (strncmp(cmd, "--port=", 7) == 0) {
+            cmd += 7; WebMenu::port = atoi(cmd);
+            char* end = strchr(cmd, ' '); cmd = end ? end : cmd + strlen(cmd);
+        } else { cmd++; }
     }
 
-    LoadOffsets(offsetsPath.c_str());
-
-    // Read string overrides from offsets file
-    {
-        std::ifstream f(offsetsPath);
-        std::string line;
-        while (std::getline(f, line)) {
-            if (line.empty() || line[0] == '#' || line[0] == ';') continue;
-            auto eq = line.find('=');
-            if (eq == std::string::npos) continue;
-            std::string key = line.substr(0, eq);
-            std::string val = line.substr(eq + 1);
-            key.erase(key.find_last_not_of(" \t\r\n") + 1);
-            key.erase(0, key.find_first_not_of(" \t\r\n"));
-            val.erase(val.find_last_not_of(" \t\r\n") + 1);
-            val.erase(0, val.find_first_not_of(" \t\r\n"));
-            if (key == "ProcessName") processName = val;
-            else if (key == "ModuleName") moduleName = val;
-        }
-    }
-
-    Offsets::Init();
+    LoadConfig(offsetsPath.c_str());
+    auto pn = Str("ProcessName"); if (!pn.empty()) processName = pn;
+    auto mn = Str("ModuleName"); if (!mn.empty()) moduleName = mn;
+    O::Init();
 
     printf("[*] Loading VMM API...\n");
     if (!LoadVMM()) return 1;
 
     printf("[*] Initializing DMA (%s)...\n", device.c_str());
     LPCSTR args[] = { "", "-device", device.c_str(), "-v", "-printf", "-waitinitialize" };
-    g_vmm = pInitialize(6, args);
+    g_vmm = pInit(6, args);
     if (!g_vmm) {
-        printf("[-] DMA initialization failed. Check FPGA card connection.\n");
-        MessageBoxA(NULL, "DMA init failed.\nCheck FPGA card and USB connection.", "DMA Error", MB_ICONERROR);
+        printf("[-] DMA initialization failed.\n");
+        MessageBoxA(NULL, "DMA init failed.\nCheck FPGA card.", "DMA Error", MB_ICONERROR);
         return 1;
     }
     printf("[+] DMA initialized\n");
 
-    printf("[*] Waiting for %s on target PC...\n", processName.c_str());
-    while (!pPidGetFromName(g_vmm, processName.c_str(), &g_pid)) {
+    printf("[*] Waiting for %s...\n", processName.c_str());
+    while (!pPidGet(g_vmm, processName.c_str(), &g_pid)) {
         if (GetAsyncKeyState(VK_END) & 1) { pClose(g_vmm); return 0; }
-        Sleep(2000);
-        printf(".");
+        Sleep(2000); printf(".");
     }
     printf("\n[+] Found %s  PID=%u\n", processName.c_str(), g_pid);
 
-    g_base = pGetModuleBase ? pGetModuleBase(g_vmm, g_pid, moduleName.c_str()) : 0;
-    if (!g_base) {
-        printf("[!] Module base not found, using default 0x140000000\n");
-        g_base = 0x140000000;
-    }
+    g_base = pModBase ? pModBase(g_vmm, g_pid, moduleName.c_str()) : 0;
+    if (!g_base) { printf("[!] Module base not found, using 0x140000000\n"); g_base = 0x140000000; }
     printf("[+] %s base: 0x%llX\n", moduleName.c_str(), (unsigned long long)g_base);
 
-    if (!Offsets::GWorld) {
-        printf("[!] GWorld offset is 0 — configure %s with correct offsets.\n", offsetsPath.c_str());
-        printf("    Use dumper_dma.exe to find offsets for your game version.\n\n");
-    }
+    if (!O::GWorld)
+        printf("[!] GWorld offset is 0 — configure %s first.\n", offsetsPath.c_str());
 
-    printf("[+] Starting radar overlay\n");
-    printf("    PgUp/PgDn = Adjust range\n");
+    WebMenu::Start();
+
+    printf("[+] Web menu started on port %d\n", WebMenu::port);
+    printf("[+] Features controlled via web browser\n");
     printf("    END = Exit\n\n");
 
-    // Data read thread
-    std::thread dataThread([&]() {
-        while (Radar::running) {
-            {
-                std::lock_guard<std::mutex> lock(g_dataMutex);
-                ReadPlayers();
-            }
-            Sleep(10 + (GetTickCount() % 5));
+    while (!GetAsyncKeyState(VK_END)) {
+        {
+            std::lock_guard<std::mutex> lock(g_dataMutex);
+            ReadPlayers();
+            ApplyFeatures();
         }
-    });
-    dataThread.detach();
-
-    // Radar runs on main thread (message loop)
-    Radar::Run();
+        Sleep(10 + (GetTickCount() % 5));
+    }
 
     printf("[*] Shutting down...\n");
+    WebMenu::running = false;
     pClose(g_vmm);
     return 0;
 }

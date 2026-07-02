@@ -58,6 +58,7 @@ typedef BOOL        (__cdecl *fn_ScatPrep)(HANDLE hS, ULONG64 va, DWORD cb);
 typedef BOOL        (__cdecl *fn_ScatExec)(HANDLE hS);
 typedef BOOL        (__cdecl *fn_ScatRead)(HANDLE hS, ULONG64 va, DWORD cb, PBYTE pb, PDWORD pcbRead);
 typedef VOID        (__cdecl *fn_ScatClose)(HANDLE hS);
+typedef BOOL        (__cdecl *fn_MemWrite)(VMM_HANDLE hVMM, DWORD dwPID, ULONG64 qwA, PBYTE pb, DWORD cb);
 
 static VMM_HANDLE g_vmm = nullptr;
 static DWORD      g_pid = 0;
@@ -72,6 +73,7 @@ static fn_ScatPrep  pScatPrep = nullptr;
 static fn_ScatExec  pScatExec = nullptr;
 static fn_ScatRead  pScatRead = nullptr;
 static fn_ScatClose pScatClose = nullptr;
+static fn_MemWrite  pMemWrite = nullptr;
 
 static bool LoadVMM() {
     HMODULE h = LoadLibraryA("vmm.dll");
@@ -89,6 +91,7 @@ static bool LoadVMM() {
     pScatExec = (fn_ScatExec)GetProcAddress(h, "VMMDLL_Scatter_Execute");
     pScatRead = (fn_ScatRead)GetProcAddress(h, "VMMDLL_Scatter_Read");
     pScatClose= (fn_ScatClose)GetProcAddress(h,"VMMDLL_Scatter_CloseHandle");
+    pMemWrite = (fn_MemWrite) GetProcAddress(h, "VMMDLL_MemWrite");
     return pInit && pMemRead;
 }
 
@@ -98,6 +101,61 @@ static bool DmaRead(uint64_t va, void* buf, uint32_t size) {
 }
 
 template<class T> T rpm(uint64_t addr) { T v{}; DmaRead(addr, &v, sizeof(T)); return v; }
+
+static bool DmaWrite(uint64_t va, void* buf, uint32_t size) {
+    if (!pMemWrite) return false;
+    return pMemWrite(g_vmm, g_pid, va, (PBYTE)buf, size);
+}
+
+template<class T> bool wpm(uint64_t addr, T val) { return DmaWrite(addr, &val, sizeof(T)); }
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Feature config — toggled from web menu
+// ═══════════════════════════════════════════════════════════════════════════════
+
+namespace Config {
+    // Combat
+    inline std::atomic<bool> aimbot{false};
+    inline std::atomic<bool> triggerbot{false};
+    inline std::atomic<bool> noRecoil{false};
+    inline std::atomic<bool> noSpread{false};
+    inline std::atomic<bool> rapidFire{false};
+
+    // ESP / Visuals
+    inline std::atomic<bool> radar{true};
+    inline std::atomic<bool> glow{false};
+    inline std::atomic<bool> chams{false};
+    inline std::atomic<bool> fovChanger{false};
+    inline std::atomic<bool> espBox{false};
+    inline std::atomic<bool> espName{false};
+    inline std::atomic<bool> espHealth{false};
+    inline std::atomic<bool> espDistance{false};
+    inline std::atomic<bool> espSkeleton{false};
+    inline std::atomic<bool> espSnaplines{false};
+
+    // Misc
+    inline std::atomic<bool> noFlash{false};
+    inline std::atomic<bool> noSway{false};
+    inline std::atomic<bool> infiniteStamina{false};
+    inline std::atomic<bool> speedHack{false};
+    inline std::atomic<bool> superJump{false};
+    inline std::atomic<bool> thirdPerson{false};
+
+    // Values
+    inline std::atomic<float> aimbotFOV{15.0f};
+    inline std::atomic<float> aimbotSmooth{3.0f};
+    inline std::atomic<float> customFOV{120.0f};
+    inline std::atomic<float> glowR{1.0f};
+    inline std::atomic<float> glowG{0.0f};
+    inline std::atomic<float> glowB{0.0f};
+    inline std::atomic<float> speedMultiplier{2.0f};
+    inline std::atomic<float> jumpMultiplier{2.0f};
+    inline std::atomic<float> thirdPersonDist{300.0f};
+
+    // Aimbot state
+    inline int aimTargetIndex = -1;
+}
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -281,7 +339,44 @@ namespace O {
         Pawn_Health            = Off("Pawn_Health");
         Pawn_Team              = Off("Pawn_Team");
         Pawn_Position          = Off("Pawn_Position");
+
+        // Write offsets (for active features)
+        GlowEnable             = Off("GlowEnable");
+        GlowThroughWalls       = Off("GlowThroughWalls");
+        GlowColor              = Off("GlowColor");
+        ControlRotation        = Off("ControlRotation");
+        RecoilPitch            = Off("RecoilPitch");
+        RecoilYaw              = Off("RecoilYaw");
+        ViewAngles             = Off("ViewAngles");
+        FireRate               = Off("FireRate");
+        SpreadAngle            = Off("SpreadAngle");
+        // Chams / ESP write offsets
+        ChamsEnable            = Off("ChamsEnable");
+        ChamsThroughWalls      = Off("ChamsThroughWalls");
+        ChamsColor             = Off("ChamsColor");
+        // Misc write offsets
+        FlashAlpha             = Off("FlashAlpha");
+        FlashMaxAlpha          = Off("FlashMaxAlpha");
+        SwayScale              = Off("SwayScale");
+        Stamina                = Off("Stamina");
+        MaxStamina             = Off("MaxStamina");
+        MovementSpeed          = Off("MovementSpeed");
+        MaxWalkSpeed           = Off("MaxWalkSpeed");
+        JumpZVelocity          = Off("JumpZVelocity");
+        ThirdPersonOffset      = Off("ThirdPersonOffset");
+        DefaultMaxWalkSpeed    = Off("DefaultMaxWalkSpeed");
+        DefaultJumpZ           = Off("DefaultJumpZ");
     }
+
+    // Write-target offsets
+    uint64_t GlowEnable, GlowThroughWalls, GlowColor;
+    uint64_t ControlRotation, RecoilPitch, RecoilYaw;
+    uint64_t ViewAngles, FireRate, SpreadAngle;
+    uint64_t ChamsEnable, ChamsThroughWalls, ChamsColor;
+    uint64_t FlashAlpha, FlashMaxAlpha, SwayScale;
+    uint64_t Stamina, MaxStamina, MovementSpeed, MaxWalkSpeed;
+    uint64_t JumpZVelocity, ThirdPersonOffset;
+    uint64_t DefaultMaxWalkSpeed, DefaultJumpZ;
 }
 
 
@@ -305,6 +400,7 @@ struct FTransform {
 #define M_PI 3.14159265358979323846f
 #endif
 #define DEG2RAD(x) ((x) * (float)M_PI / 180.0f)
+#define RAD2DEG(x) ((x) * 180.0f / (float)M_PI)
 
 static float Vec3Dist(Vec3 a, Vec3 b) {
     float dx = a.x-b.x, dy = a.y-b.y, dz = a.z-b.z;
@@ -395,7 +491,9 @@ static void ReadPlayers_UE() {
     if (!lp) return;
     uint64_t pc = rpm<uint64_t>(lp + O::PlayerController);
     if (!pc) return;
+    g_playerController = pc;
     uint64_t localPawn = rpm<uint64_t>(pc + O::AcknowledgedPawn);
+    g_localPawn = localPawn;
 
     uint64_t camMgr = rpm<uint64_t>(pc + O::PlayerCameraManager);
     if (camMgr && O::CameraLocation && O::CameraRotation) {
@@ -471,7 +569,7 @@ static void ReadPlayers_UE() {
             }
 
             p.valid = (p.health > 0);
-            if (p.valid) count++;
+            if (p.valid) { g_actorPtrs[count] = actor; count++; }
         }
     }
     g_playerCount = count;
@@ -528,6 +626,7 @@ static void ReadPlayers_EntityList() {
         p.headPos  = { origin.x, origin.y, origin.z + 72.0f };
         p.name[0]  = 0;
         p.valid    = true;
+        g_actorPtrs[count] = pawn;
         count++;
     }
     g_playerCount = count;
@@ -587,15 +686,224 @@ static void ReadPlayers_Unity() {
         p.headPos  = { pos.x, pos.y, pos.z + 1.7f };
         p.name[0]  = 0;
         p.valid    = true;
+        g_actorPtrs[count] = gameObj;
         count++;
     }
     g_playerCount = count;
 }
 
 static void ReadPlayers() {
+    memset(g_actorPtrs, 0, sizeof(g_actorPtrs));
     if (O::engine == "entitylist")    ReadPlayers_EntityList();
     else if (O::engine == "unity")   ReadPlayers_Unity();
     else                             ReadPlayers_UE();
+}
+
+// Store actor pointers for write-back features
+static uint64_t g_actorPtrs[128];
+static uint64_t g_localPawn = 0;
+static uint64_t g_playerController = 0;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DMA Write features — aimbot, glow, no-recoil, triggerbot, etc.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static Vec3 CalcAngle(Vec3 src, Vec3 dst) {
+    Vec3 delta = { dst.x - src.x, dst.y - src.y, dst.z - src.z };
+    float hyp = sqrtf(delta.x*delta.x + delta.y*delta.y);
+    Vec3 angles;
+    angles.x = -RAD2DEG(atan2f(delta.z, hyp)); // pitch
+    angles.y = RAD2DEG(atan2f(delta.y, delta.x)); // yaw
+    angles.z = 0;
+    return angles;
+}
+
+static float AngleFOV(Vec3 viewAngles, Vec3 targetAngles) {
+    float dp = targetAngles.x - viewAngles.x;
+    float dy = targetAngles.y - viewAngles.y;
+    while (dy > 180.f) dy -= 360.f;
+    while (dy < -180.f) dy += 360.f;
+    return sqrtf(dp*dp + dy*dy);
+}
+
+static void ApplyAimbot() {
+    if (!Config::aimbot || !g_playerController) return;
+    if (!O::ControlRotation && !O::ViewAngles) return;
+
+    Vec3 camPos = g_localPos;
+    FRotator camRot = {};
+    if (g_playerController && O::CameraRotation) {
+        uint64_t camMgr = rpm<uint64_t>(g_playerController + O::PlayerCameraManager);
+        if (camMgr) camRot = rpm<FRotator>(camMgr + O::CameraRotation);
+    }
+    Vec3 viewAngles = { camRot.pitch, camRot.yaw, 0 };
+
+    int bestIdx = -1;
+    float bestFov = Config::aimbotFOV.load();
+
+    for (int i = 0; i < g_playerCount; i++) {
+        if (!g_players[i].valid) continue;
+        Vec3 target = g_players[i].headPos;
+        Vec3 angle = CalcAngle(camPos, target);
+        float fov = AngleFOV(viewAngles, angle);
+        if (fov < bestFov) { bestFov = fov; bestIdx = i; }
+    }
+
+    Config::aimTargetIndex = bestIdx;
+    if (bestIdx < 0) return;
+
+    if (!(GetAsyncKeyState(VK_RBUTTON) & 0x8000)) return;
+
+    Vec3 target = CalcAngle(camPos, g_players[bestIdx].headPos);
+    float smooth = Config::aimbotSmooth.load();
+    if (smooth < 1.0f) smooth = 1.0f;
+
+    FRotator newRot;
+    newRot.pitch = viewAngles.x + (target.x - viewAngles.x) / smooth;
+    newRot.yaw   = viewAngles.y + (target.y - viewAngles.y) / smooth;
+    newRot.roll  = 0;
+
+    if (O::ControlRotation && g_playerController)
+        wpm(g_playerController + O::ControlRotation, newRot);
+    else if (O::ViewAngles)
+        wpm(g_base + O::ViewAngles, newRot);
+}
+
+static void ApplyGlow() {
+    if (!Config::glow || !O::GlowEnable) return;
+    for (int i = 0; i < g_playerCount; i++) {
+        uint64_t actor = g_actorPtrs[i];
+        if (!actor) continue;
+        wpm<uint8_t>(actor + O::GlowEnable, 1);
+        if (O::GlowThroughWalls)
+            wpm<uint8_t>(actor + O::GlowThroughWalls, 1);
+        if (O::GlowColor) {
+            float color[3] = { Config::glowR, Config::glowG, Config::glowB };
+            DmaWrite(actor + O::GlowColor, color, sizeof(color));
+        }
+    }
+}
+
+static void ApplyNoRecoil() {
+    if (!Config::noRecoil) return;
+    if (!g_localPawn) return;
+    if (O::RecoilPitch) wpm<float>(g_localPawn + O::RecoilPitch, 0.0f);
+    if (O::RecoilYaw)   wpm<float>(g_localPawn + O::RecoilYaw, 0.0f);
+}
+
+static void ApplyNoSpread() {
+    if (!Config::noSpread || !O::SpreadAngle) return;
+    if (!g_localPawn) return;
+    wpm<float>(g_localPawn + O::SpreadAngle, 0.0f);
+}
+
+static void ApplyRapidFire() {
+    if (!Config::rapidFire || !O::FireRate) return;
+    if (!g_localPawn) return;
+    wpm<float>(g_localPawn + O::FireRate, 0.0f);
+}
+
+static void ApplyFOV() {
+    if (!Config::fovChanger || !O::CameraFOV) return;
+    if (!g_playerController) return;
+    uint64_t camMgr = rpm<uint64_t>(g_playerController + O::PlayerCameraManager);
+    if (camMgr) wpm<float>(camMgr + O::CameraFOV, Config::customFOV.load());
+}
+
+static void ApplyTriggerbot() {
+    if (!Config::triggerbot) return;
+    if (Config::aimTargetIndex < 0) return;
+    float dist = g_players[Config::aimTargetIndex].distance;
+    if (dist > 200.0f) return;
+    Vec3 camPos = g_localPos;
+    Vec3 target = CalcAngle(camPos, g_players[Config::aimTargetIndex].headPos);
+    FRotator camRot = {};
+    if (g_playerController) {
+        uint64_t camMgr = rpm<uint64_t>(g_playerController + O::PlayerCameraManager);
+        if (camMgr && O::CameraRotation) camRot = rpm<FRotator>(camMgr + O::CameraRotation);
+    }
+    Vec3 view = { camRot.pitch, camRot.yaw, 0 };
+    if (AngleFOV(view, target) < 2.0f) {
+        INPUT input = {}; input.type = INPUT_MOUSE;
+        input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        SendInput(1, &input, sizeof(INPUT));
+        Sleep(30);
+        input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        SendInput(1, &input, sizeof(INPUT));
+    }
+}
+
+static void ApplyChams() {
+    if (!Config::chams || !O::ChamsEnable) return;
+    for (int i = 0; i < g_playerCount; i++) {
+        uint64_t actor = g_actorPtrs[i];
+        if (!actor) continue;
+        wpm<uint8_t>(actor + O::ChamsEnable, 1);
+        if (O::ChamsThroughWalls) wpm<uint8_t>(actor + O::ChamsThroughWalls, 1);
+        if (O::ChamsColor) {
+            float color[3] = { Config::glowR, Config::glowG, Config::glowB };
+            DmaWrite(actor + O::ChamsColor, color, sizeof(color));
+        }
+    }
+}
+
+static void ApplyNoFlash() {
+    if (!Config::noFlash || !g_localPawn) return;
+    if (O::FlashAlpha) wpm<float>(g_localPawn + O::FlashAlpha, 0.0f);
+    if (O::FlashMaxAlpha) wpm<float>(g_localPawn + O::FlashMaxAlpha, 0.0f);
+}
+
+static void ApplyNoSway() {
+    if (!Config::noSway || !g_localPawn) return;
+    if (O::SwayScale) wpm<float>(g_localPawn + O::SwayScale, 0.0f);
+}
+
+static void ApplyInfiniteStamina() {
+    if (!Config::infiniteStamina || !g_localPawn) return;
+    if (O::Stamina && O::MaxStamina) {
+        float maxStam = rpm<float>(g_localPawn + O::MaxStamina);
+        if (maxStam > 0) wpm<float>(g_localPawn + O::Stamina, maxStam);
+    }
+}
+
+static void ApplySpeedHack() {
+    if (!g_localPawn) return;
+    if (!O::MaxWalkSpeed && !O::MovementSpeed) return;
+    if (Config::speedHack) {
+        float base = O::DefaultMaxWalkSpeed ? rpm<float>(g_localPawn + O::DefaultMaxWalkSpeed) : 600.0f;
+        float target = base * Config::speedMultiplier.load();
+        if (O::MaxWalkSpeed) wpm<float>(g_localPawn + O::MaxWalkSpeed, target);
+        if (O::MovementSpeed) wpm<float>(g_localPawn + O::MovementSpeed, target);
+    }
+}
+
+static void ApplySuperJump() {
+    if (!Config::superJump || !g_localPawn || !O::JumpZVelocity) return;
+    float base = O::DefaultJumpZ ? rpm<float>(g_localPawn + O::DefaultJumpZ) : 420.0f;
+    wpm<float>(g_localPawn + O::JumpZVelocity, base * Config::jumpMultiplier.load());
+}
+
+static void ApplyThirdPerson() {
+    if (!Config::thirdPerson || !g_playerController || !O::ThirdPersonOffset) return;
+    uint64_t camMgr = rpm<uint64_t>(g_playerController + O::PlayerCameraManager);
+    if (camMgr) wpm<float>(camMgr + O::ThirdPersonOffset, Config::thirdPersonDist.load());
+}
+
+static void ApplyFeatures() {
+    ApplyAimbot();
+    ApplyGlow();
+    ApplyChams();
+    ApplyNoRecoil();
+    ApplyNoSpread();
+    ApplyRapidFire();
+    ApplyFOV();
+    ApplyTriggerbot();
+    ApplyNoFlash();
+    ApplyNoSway();
+    ApplyInfiniteStamina();
+    ApplySpeedHack();
+    ApplySuperJump();
+    ApplyThirdPerson();
 }
 
 
@@ -852,6 +1160,35 @@ namespace WebRadar {
            << ",\"z\":" << g_localPos.z << ",\"yaw\":" << g_localYaw
            << ",\"team\":" << g_localTeam << "},"
            << "\"scale\":" << g_unitScale << ","
+           << "\"cfg\":{"
+           << "\"aimbot\":" << (Config::aimbot?"true":"false") << ","
+           << "\"triggerbot\":" << (Config::triggerbot?"true":"false") << ","
+           << "\"noRecoil\":" << (Config::noRecoil?"true":"false") << ","
+           << "\"noSpread\":" << (Config::noSpread?"true":"false") << ","
+           << "\"rapidFire\":" << (Config::rapidFire?"true":"false") << ","
+           << "\"glow\":" << (Config::glow?"true":"false") << ","
+           << "\"chams\":" << (Config::chams?"true":"false") << ","
+           << "\"fovChanger\":" << (Config::fovChanger?"true":"false") << ","
+           << "\"radar\":" << (Config::radar?"true":"false") << ","
+           << "\"espBox\":" << (Config::espBox?"true":"false") << ","
+           << "\"espName\":" << (Config::espName?"true":"false") << ","
+           << "\"espHealth\":" << (Config::espHealth?"true":"false") << ","
+           << "\"espDistance\":" << (Config::espDistance?"true":"false") << ","
+           << "\"espSkeleton\":" << (Config::espSkeleton?"true":"false") << ","
+           << "\"espSnaplines\":" << (Config::espSnaplines?"true":"false") << ","
+           << "\"noFlash\":" << (Config::noFlash?"true":"false") << ","
+           << "\"noSway\":" << (Config::noSway?"true":"false") << ","
+           << "\"infiniteStamina\":" << (Config::infiniteStamina?"true":"false") << ","
+           << "\"speedHack\":" << (Config::speedHack?"true":"false") << ","
+           << "\"superJump\":" << (Config::superJump?"true":"false") << ","
+           << "\"thirdPerson\":" << (Config::thirdPerson?"true":"false") << ","
+           << "\"aimbotFOV\":" << Config::aimbotFOV.load() << ","
+           << "\"aimbotSmooth\":" << Config::aimbotSmooth.load() << ","
+           << "\"customFOV\":" << Config::customFOV.load() << ","
+           << "\"speedMultiplier\":" << Config::speedMultiplier.load() << ","
+           << "\"jumpMultiplier\":" << Config::jumpMultiplier.load() << ","
+           << "\"thirdPersonDist\":" << Config::thirdPersonDist.load()
+           << "},"
            << "\"players\":[";
         for (int i = 0; i < g_playerCount; i++) {
             auto& p = g_players[i];
@@ -876,55 +1213,171 @@ namespace WebRadar {
         return js.str();
     }
 
+    static void HandleToggle(const char* body) {
+        auto getVal = [&](const char* key) -> std::string {
+            const char* p = strstr(body, key);
+            if (!p) return "";
+            p += strlen(key);
+            if (*p != '=') return "";
+            p++;
+            const char* end = strchr(p, '&');
+            return end ? std::string(p, end) : std::string(p);
+        };
+        std::string k = getVal("key");
+        std::string v = getVal("val");
+        if (k.empty()) return;
+        bool bv = (v == "true" || v == "1");
+        float fv = (float)atof(v.c_str());
+
+        if (k == "aimbot")            Config::aimbot = bv;
+        else if (k == "triggerbot")   Config::triggerbot = bv;
+        else if (k == "noRecoil")     Config::noRecoil = bv;
+        else if (k == "noSpread")     Config::noSpread = bv;
+        else if (k == "rapidFire")    Config::rapidFire = bv;
+        else if (k == "glow")         Config::glow = bv;
+        else if (k == "chams")        Config::chams = bv;
+        else if (k == "fovChanger")   Config::fovChanger = bv;
+        else if (k == "radar")        Config::radar = bv;
+        else if (k == "espBox")       Config::espBox = bv;
+        else if (k == "espName")      Config::espName = bv;
+        else if (k == "espHealth")    Config::espHealth = bv;
+        else if (k == "espDistance")  Config::espDistance = bv;
+        else if (k == "espSkeleton")  Config::espSkeleton = bv;
+        else if (k == "espSnaplines") Config::espSnaplines = bv;
+        else if (k == "noFlash")      Config::noFlash = bv;
+        else if (k == "noSway")       Config::noSway = bv;
+        else if (k == "infiniteStamina") Config::infiniteStamina = bv;
+        else if (k == "speedHack")    Config::speedHack = bv;
+        else if (k == "superJump")    Config::superJump = bv;
+        else if (k == "thirdPerson")  Config::thirdPerson = bv;
+        else if (k == "aimbotFOV")    Config::aimbotFOV = fv;
+        else if (k == "aimbotSmooth") Config::aimbotSmooth = fv;
+        else if (k == "customFOV")    Config::customFOV = fv;
+        else if (k == "speedMultiplier")   Config::speedMultiplier = fv;
+        else if (k == "jumpMultiplier")    Config::jumpMultiplier = fv;
+        else if (k == "thirdPersonDist")   Config::thirdPersonDist = fv;
+    }
+
     static const char* HTML_PAGE = R"HTML(<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-<title>DMA Radar</title>
+<title>DMA Cheat</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#0c0c12;color:#b4b4b4;font-family:'Consolas','Courier New',monospace;overflow:hidden;touch-action:none}
+body{background:#0c0c12;color:#b4b4b4;font-family:'Consolas','Courier New',monospace;overflow-x:hidden}
 #wrap{display:flex;height:100vh;width:100vw}
 #radar-box{flex:1;display:flex;align-items:center;justify-content:center;min-width:0}
-canvas{display:block;border-radius:50%;image-rendering:auto}
-#panel{width:280px;padding:16px;overflow-y:auto;background:#10101a;border-left:1px solid #222}
-#title{font-size:18px;font-weight:bold;margin-bottom:8px}
-#status{font-size:13px;color:#888;margin-bottom:12px}
-.sep{height:1px;background:#333;margin:8px 0}
-.enemy{font-size:12px;color:#ff7878;margin-bottom:2px}
-.hpbar{height:4px;background:#282828;margin-bottom:8px;border-radius:2px}
+canvas{display:block;border-radius:50%}
+#panel{width:320px;padding:16px;overflow-y:auto;background:#10101a;border-left:1px solid #222}
+#title{font-size:18px;font-weight:bold;margin-bottom:4px}
+#status{font-size:12px;color:#888;margin-bottom:8px}
+.sep{height:1px;background:#333;margin:10px 0}
+.cat{font-size:13px;color:#ff9040;font-weight:bold;margin:10px 0 6px 0;text-transform:uppercase;letter-spacing:1px}
+.row{display:flex;align-items:center;justify-content:space-between;padding:4px 0}
+.row label{font-size:12px;flex:1}
+.tog{width:40px;height:20px;border-radius:10px;background:#333;cursor:pointer;position:relative;transition:.2s}
+.tog.on{background:#ff4040}
+.tog::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#888;transition:.2s}
+.tog.on::after{left:22px;background:#fff}
+.sld{display:flex;align-items:center;padding:2px 0 6px 0}
+.sld label{font-size:11px;width:100px}
+.sld input[type=range]{flex:1;accent-color:#ff4040}
+.sld .val{font-size:11px;width:40px;text-align:right;color:#ff9040}
+.enemy{font-size:11px;color:#ff7878;margin-bottom:2px}
+.hpbar{height:3px;background:#282828;margin-bottom:6px;border-radius:2px}
 .hpbar div{height:100%;border-radius:2px}
-#controls{margin-top:16px}
-#controls button{background:#1a1a2a;color:#aaa;border:1px solid #333;padding:6px 14px;margin:2px;cursor:pointer;font-family:inherit;font-size:12px;border-radius:3px}
-#controls button:hover{background:#252540;color:#fff}
-#web-info{font-size:11px;color:#555;margin-top:16px;line-height:1.5}
-#conn{font-size:11px;color:#444;margin-top:4px}
+#plist{max-height:200px;overflow-y:auto}
+#range-btns{margin:6px 0}
+#range-btns button{background:#1a1a2a;color:#aaa;border:1px solid #333;padding:4px 12px;margin:2px;cursor:pointer;font-family:inherit;font-size:11px;border-radius:3px}
+#range-btns button:hover{background:#252540;color:#fff}
+#conn{font-size:10px;color:#444;margin-top:8px}
 @media(max-width:700px){
   #wrap{flex-direction:column}
-  #panel{width:100%;height:40vh;border-left:none;border-top:1px solid #222}
-  #radar-box{height:60vh}
+  #panel{width:100%;max-height:50vh;border-left:none;border-top:1px solid #222}
+  #radar-box{height:50vh}
 }
 </style>
 </head><body>
 <div id="wrap">
 <div id="radar-box"><canvas id="c"></canvas></div>
 <div id="panel">
-  <div id="title">DMA RADAR</div>
+  <div id="title">DMA CHEAT</div>
   <div id="status">Connecting...</div>
   <div class="sep"></div>
-  <div id="plist"></div>
-  <div id="controls">
+
+  <div class="cat">Combat</div>
+  <div class="row"><label>Aimbot</label><div class="tog" data-key="aimbot" onclick="tog(this)"></div></div>
+  <div class="sld"><label>Aim FOV</label><input type="range" min="1" max="90" value="15" data-key="aimbotFOV" oninput="sld(this)"><span class="val">15</span></div>
+  <div class="sld"><label>Smoothing</label><input type="range" min="1" max="20" value="3" data-key="aimbotSmooth" oninput="sld(this)"><span class="val">3</span></div>
+  <div class="row"><label>Triggerbot</label><div class="tog" data-key="triggerbot" onclick="tog(this)"></div></div>
+  <div class="row"><label>No Recoil</label><div class="tog" data-key="noRecoil" onclick="tog(this)"></div></div>
+  <div class="row"><label>No Spread</label><div class="tog" data-key="noSpread" onclick="tog(this)"></div></div>
+  <div class="row"><label>Rapid Fire</label><div class="tog" data-key="rapidFire" onclick="tog(this)"></div></div>
+
+  <div class="cat">ESP</div>
+  <div class="row"><label>Box ESP</label><div class="tog" data-key="espBox" onclick="tog(this)"></div></div>
+  <div class="row"><label>Name ESP</label><div class="tog" data-key="espName" onclick="tog(this)"></div></div>
+  <div class="row"><label>Health Bars</label><div class="tog" data-key="espHealth" onclick="tog(this)"></div></div>
+  <div class="row"><label>Distance</label><div class="tog" data-key="espDistance" onclick="tog(this)"></div></div>
+  <div class="row"><label>Skeleton</label><div class="tog" data-key="espSkeleton" onclick="tog(this)"></div></div>
+  <div class="row"><label>Snaplines</label><div class="tog" data-key="espSnaplines" onclick="tog(this)"></div></div>
+  <div class="row"><label>Glow</label><div class="tog" data-key="glow" onclick="tog(this)"></div></div>
+  <div class="row"><label>Chams</label><div class="tog" data-key="chams" onclick="tog(this)"></div></div>
+
+  <div class="cat">Visuals</div>
+  <div class="row"><label>Radar</label><div class="tog on" data-key="radar" onclick="tog(this)"></div></div>
+  <div class="row"><label>FOV Changer</label><div class="tog" data-key="fovChanger" onclick="tog(this)"></div></div>
+  <div class="sld"><label>Custom FOV</label><input type="range" min="60" max="160" value="120" data-key="customFOV" oninput="sld(this)"><span class="val">120</span></div>
+  <div class="row"><label>Third Person</label><div class="tog" data-key="thirdPerson" onclick="tog(this)"></div></div>
+  <div class="sld"><label>TP Distance</label><input type="range" min="100" max="800" value="300" data-key="thirdPersonDist" oninput="sld(this)"><span class="val">300</span></div>
+
+  <div class="cat">Misc</div>
+  <div class="row"><label>No Flash</label><div class="tog" data-key="noFlash" onclick="tog(this)"></div></div>
+  <div class="row"><label>No Sway</label><div class="tog" data-key="noSway" onclick="tog(this)"></div></div>
+  <div class="row"><label>Infinite Stamina</label><div class="tog" data-key="infiniteStamina" onclick="tog(this)"></div></div>
+  <div class="row"><label>Speed Hack</label><div class="tog" data-key="speedHack" onclick="tog(this)"></div></div>
+  <div class="sld"><label>Speed Multi</label><input type="range" min="1" max="10" value="2" data-key="speedMultiplier" oninput="sld(this)"><span class="val">2</span></div>
+  <div class="row"><label>Super Jump</label><div class="tog" data-key="superJump" onclick="tog(this)"></div></div>
+  <div class="sld"><label>Jump Multi</label><input type="range" min="1" max="10" value="2" data-key="jumpMultiplier" oninput="sld(this)"><span class="val">2</span></div>
+
+  <div class="sep"></div>
+  <div id="range-btns">
     <button onclick="chRange(50)">Range +</button>
     <button onclick="chRange(-50)">Range -</button>
   </div>
-  <div id="web-info"></div>
+  <div class="sep"></div>
+  <div id="plist"></div>
   <div id="conn"></div>
 </div>
 </div>
 <script>
 const C=document.getElementById('c'),X=C.getContext('2d');
-let D={game:'',count:0,range:200,local:{x:0,y:0,z:0,yaw:0,team:0},scale:100,players:[]};
+let D={game:'',count:0,range:200,local:{x:0,y:0,z:0,yaw:0,team:0},scale:100,players:[],cfg:{}};
 let range=200,fails=0;
+
+function tog(el){
+  const on=!el.classList.contains('on');
+  el.classList.toggle('on',on);
+  fetch('/api/set',{method:'POST',body:'key='+el.dataset.key+'&val='+(on?'true':'false')});
+}
+function sld(el){
+  el.nextElementSibling.textContent=el.value;
+  fetch('/api/set',{method:'POST',body:'key='+el.dataset.key+'&val='+el.value});
+}
+function chRange(d){range=Math.max(50,Math.min(800,range+d))}
+
+function syncUI(cfg){
+  if(!cfg)return;
+  document.querySelectorAll('.tog').forEach(t=>{
+    const v=cfg[t.dataset.key];
+    if(v!==undefined)t.classList.toggle('on',v);
+  });
+  document.querySelectorAll('.sld input[type=range]').forEach(s=>{
+    const v=cfg[s.dataset.key];
+    if(v!==undefined){s.value=v;s.nextElementSibling.textContent=Math.round(v)}
+  });
+}
 
 function sz(){
   const b=document.getElementById('radar-box');
@@ -936,119 +1389,85 @@ function sz(){
   return s;
 }
 window.addEventListener('resize',()=>sz());
-
-function chRange(d){range=Math.max(50,Math.min(800,range+d))}
-
 function deg2rad(d){return d*Math.PI/180}
 
 function draw(){
   const s=sz(),cx=s/2,cy=s/2,r=s/2-10;
   X.clearRect(0,0,s,s);
-
-  // Background
-  X.beginPath();X.arc(cx,cy,r,0,Math.PI*2);
-  X.fillStyle='#141a14';X.fill();
-
-  // Grid rings
-  for(let f of[1,.75,.5,.25]){
-    X.beginPath();X.arc(cx,cy,r*f,0,Math.PI*2);
-    X.strokeStyle='#1e281e';X.lineWidth=1;X.stroke();
-  }
-  // Crosshair
-  X.beginPath();X.moveTo(cx-r,cy);X.lineTo(cx+r,cy);
-  X.moveTo(cx,cy-r);X.lineTo(cx,cy+r);
-  X.strokeStyle='#232d23';X.stroke();
-
-  // Compass
+  X.beginPath();X.arc(cx,cy,r,0,Math.PI*2);X.fillStyle='#141a14';X.fill();
+  for(let f of[1,.75,.5,.25]){X.beginPath();X.arc(cx,cy,r*f,0,Math.PI*2);X.strokeStyle='#1e281e';X.lineWidth=1;X.stroke()}
+  X.beginPath();X.moveTo(cx-r,cy);X.lineTo(cx+r,cy);X.moveTo(cx,cy-r);X.lineTo(cx,cy+r);X.strokeStyle='#232d23';X.stroke();
   const yaw=deg2rad(D.local.yaw||0);
   const dirs=['N','E','S','W'],angs=[0,90,180,270];
   X.font='11px Consolas';X.fillStyle='#647864';X.textAlign='center';X.textBaseline='middle';
-  for(let i=0;i<4;i++){
-    const a=deg2rad(angs[i])-yaw;
-    X.fillText(dirs[i],cx+Math.sin(a)*(r+14),cy-Math.cos(a)*(r+14));
-  }
-
-  // Range label
-  X.font='10px Consolas';X.fillStyle='#3c503c';X.textAlign='right';
-  X.fillText(range+'m',cx+r-4,cy+14);
-
-  // Local player
-  X.beginPath();X.arc(cx,cy,5,0,Math.PI*2);
-  X.fillStyle='#00c8ff';X.fill();
-  X.beginPath();X.moveTo(cx,cy);X.lineTo(cx,cy-16);
-  X.strokeStyle='#00c8ff';X.lineWidth=2;X.stroke();
-
-  const sc=D.scale||100;
-  // Enemy dots
+  for(let i=0;i<4;i++){const a=deg2rad(angs[i])-yaw;X.fillText(dirs[i],cx+Math.sin(a)*(r+14),cy-Math.cos(a)*(r+14))}
+  X.font='10px Consolas';X.fillStyle='#3c503c';X.textAlign='right';X.fillText(range+'m',cx+r-4,cy+14);
+  X.beginPath();X.arc(cx,cy,5,0,Math.PI*2);X.fillStyle='#00c8ff';X.fill();
+  X.beginPath();X.moveTo(cx,cy);X.lineTo(cx,cy-16);X.strokeStyle='#00c8ff';X.lineWidth=2;X.stroke();
+  const sc=D.scale||100;const cfg=D.cfg||{};
   for(const p of D.players){
-    let wx=(p.x-D.local.x)/sc, wy=(p.y-D.local.y)/sc;
-    const a=-yaw;
-    const rx=wx*Math.cos(a)-wy*Math.sin(a);
-    const ry=wx*Math.sin(a)+wy*Math.cos(a);
-    const scale=r/range;
-    let px=cx+rx*scale, py=cy-ry*scale;
+    let wx=(p.x-D.local.x)/sc,wy=(p.y-D.local.y)/sc;
+    const a=-yaw,rx=wx*Math.cos(a)-wy*Math.sin(a),ry=wx*Math.sin(a)+wy*Math.cos(a);
+    const scale=r/range;let px=cx+rx*scale,py=cy-ry*scale;
     const dd=Math.sqrt((px-cx)**2+(py-cy)**2);
-    if(dd>r-4){
-      const ang=Math.atan2(px-cx,cy-py);
-      px=cx+Math.sin(ang)*(r-4);
-      py=cy-Math.cos(ang)*(r-4);
-    }
-    const hpp=p.mhp>0?p.hp/p.mhp:1;
-    const col=hpp<.3?'#ffff00':'#ff3232';
-    const ds=p.d<50?6:p.d<150?5:4;
-    X.beginPath();X.arc(px,py,ds,0,Math.PI*2);
-    X.fillStyle=col;X.fill();
-    X.font='10px Consolas';X.fillStyle='#b4b4b4';X.textAlign='left';X.textBaseline='middle';
-    X.fillText(Math.round(p.d)+'',px+ds+3,py);
+    if(dd>r-4){const ang=Math.atan2(px-cx,cy-py);px=cx+Math.sin(ang)*(r-4);py=cy-Math.cos(ang)*(r-4)}
+    const hpp=p.mhp>0?p.hp/p.mhp:1,col=hpp<.3?'#ffff00':'#ff3232',ds=p.d<50?6:p.d<150?5:4;
+    // Snaplines
+    if(cfg.espSnaplines){X.beginPath();X.moveTo(cx,cy);X.lineTo(px,py);X.strokeStyle='rgba(255,50,50,0.3)';X.lineWidth=1;X.stroke()}
+    // Box ESP
+    if(cfg.espBox){const bw=Math.max(8,20-p.d/20),bh=bw*2.2;X.strokeStyle=col;X.lineWidth=1;X.strokeRect(px-bw/2,py-bh/2,bw,bh)}
+    // Dot
+    X.beginPath();X.arc(px,py,ds,0,Math.PI*2);X.fillStyle=col;X.fill();
+    // ESP text
+    let ty=py-ds-4;X.font='9px Consolas';X.textAlign='center';X.textBaseline='bottom';
+    if(cfg.espName){const nm=p.n||'Enemy';X.fillStyle='#fff';X.fillText(nm,px,ty);ty-=10}
+    if(cfg.espHealth){const htxt=p.hp+'/'+p.mhp;X.fillStyle=col;X.fillText(htxt,px,ty);ty-=10}
+    if(cfg.espDistance){X.fillStyle='#aaa';X.fillText(Math.round(p.d)+'m',px,ty);ty-=10}
+    // Health bar under dot
+    if(cfg.espHealth){const bw=Math.max(12,24-p.d/15);X.fillStyle='#333';X.fillRect(px-bw/2,py+ds+2,bw,3);const cr2=Math.round(255*(1-hpp)),cg2=Math.round(255*hpp);X.fillStyle='rgb('+cr2+','+cg2+',0)';X.fillRect(px-bw/2,py+ds+2,bw*hpp,3)}
+    // Distance label (always show if no ESP distance toggle)
+    if(!cfg.espDistance){X.font='10px Consolas';X.fillStyle='#b4b4b4';X.textAlign='left';X.textBaseline='middle';X.fillText(Math.round(p.d)+'',px+ds+3,py)}
   }
-
   requestAnimationFrame(draw);
 }
 
 async function poll(){
   try{
-    const r=await fetch('/api/data');
-    if(!r.ok)throw 0;
-    D=await r.json();
-    range=D.range||range;
-    fails=0;
-    document.getElementById('title').textContent=(D.game||'DMA')+' RADAR';
+    const r=await fetch('/api/data');if(!r.ok)throw 0;
+    D=await r.json();range=D.range||range;fails=0;
+    document.getElementById('title').textContent=(D.game||'DMA')+' CHEAT';
     document.getElementById('status').textContent='Enemies: '+D.count+'  Range: '+range+'m';
-    document.getElementById('conn').textContent='Connected';
-    document.getElementById('conn').style.color='#4a4';
-
-    const pl=document.getElementById('plist');
-    let h='';
-    for(const p of D.players.slice(0,20)){
-      const nm=p.n||'Enemy';
-      const hpp=p.mhp>0?p.hp/p.mhp:1;
-      const r=Math.round(255*(1-hpp)),g=Math.round(255*hpp);
+    document.getElementById('conn').textContent='Connected';document.getElementById('conn').style.color='#4a4';
+    syncUI(D.cfg);
+    const pl=document.getElementById('plist');let h='';
+    for(const p of D.players.slice(0,16)){
+      const nm=p.n||'Enemy',hpp=p.mhp>0?p.hp/p.mhp:1;
+      const cr=Math.round(255*(1-hpp)),cg=Math.round(255*hpp);
       h+='<div class="enemy">'+nm+'  '+Math.round(p.d)+'m  '+p.hp+'HP</div>';
-      h+='<div class="hpbar"><div style="width:'+Math.round(hpp*100)+'%;background:rgb('+r+','+g+',0)"></div></div>';
+      h+='<div class="hpbar"><div style="width:'+Math.round(hpp*100)+'%;background:rgb('+cr+','+cg+',0)"></div></div>';
     }
     pl.innerHTML=h;
-  }catch(e){
-    fails++;
-    document.getElementById('conn').textContent='Disconnected (retry '+ fails+')';
-    document.getElementById('conn').style.color='#a44';
-  }
+  }catch(e){fails++;document.getElementById('conn').textContent='Disconnected ('+fails+')';document.getElementById('conn').style.color='#a44'}
   setTimeout(poll,100);
 }
-
-draw();
-poll();
-document.getElementById('web-info').textContent='Share this URL with teammates. Works on phone/tablet/any browser.';
+draw();poll();
 </script>
 </body></html>)HTML";
 
     static void HandleClient(SOCKET client) {
-        char buf[4096];
+        char buf[8192];
         int n = recv(client, buf, sizeof(buf)-1, 0);
         if (n <= 0) { closesocket(client); return; }
         buf[n] = 0;
 
         std::string response;
-        if (strstr(buf, "GET /api/data")) {
+        if (strstr(buf, "POST /api/set")) {
+            char* body = strstr(buf, "\r\n\r\n");
+            if (body) { body += 4; HandleToggle(body); }
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+                       "Access-Control-Allow-Origin: *\r\nContent-Length: 2\r\n"
+                       "Connection: close\r\n\r\nOK";
+        } else if (strstr(buf, "GET /api/data")) {
             std::string json = BuildJSON();
             response = "HTTP/1.1 200 OK\r\n"
                        "Content-Type: application/json\r\n"
@@ -1057,7 +1476,8 @@ document.getElementById('web-info').textContent='Share this URL with teammates. 
                        "Content-Length: " + std::to_string(json.size()) + "\r\n"
                        "Connection: close\r\n\r\n" + json;
         } else if (strstr(buf, "GET / ") || strstr(buf, "GET / HTTP") ||
-                   strstr(buf, "GET /index") || strstr(buf, "GET /radar")) {
+                   strstr(buf, "GET /index") || strstr(buf, "GET /radar") ||
+                   strstr(buf, "GET /menu")) {
             std::string body = HTML_PAGE;
             response = "HTTP/1.1 200 OK\r\n"
                        "Content-Type: text/html; charset=utf-8\r\n"
@@ -1074,69 +1494,47 @@ document.getElementById('web-info').textContent='Share this URL with teammates. 
     static void ServerThread() {
         WSADATA wsa;
         WSAStartup(MAKEWORD(2,2), &wsa);
-
         SOCKET srv = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (srv == INVALID_SOCKET) {
-            printf("[!] Web radar: socket() failed\n");
-            return;
-        }
+        if (srv == INVALID_SOCKET) { printf("[!] Web: socket() failed\n"); return; }
         int opt = 1;
         setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt));
-
         sockaddr_in addr = {};
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = INADDR_ANY;
         addr.sin_port = htons((u_short)port);
-
         if (bind(srv, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-            printf("[!] Web radar: port %d in use, trying %d\n", port, port+1);
             port++;
             addr.sin_port = htons((u_short)port);
             if (bind(srv, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-                printf("[!] Web radar: bind failed\n");
-                closesocket(srv);
-                return;
+                printf("[!] Web: bind failed\n"); closesocket(srv); return;
             }
         }
-
         listen(srv, 16);
-
-        // Print all local IPs so user can share
-        char hostname[256];
-        gethostname(hostname, sizeof(hostname));
+        char hostname[256]; gethostname(hostname, sizeof(hostname));
         addrinfo hints = {}, *res = nullptr;
-        hints.ai_family = AF_INET;
-        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
         if (getaddrinfo(hostname, nullptr, &hints, &res) == 0) {
-            printf("[+] Web radar URLs:\n");
+            printf("[+] Web menu URLs:\n");
             for (auto* p = res; p; p = p->ai_next) {
-                char ip[64];
-                inet_ntop(AF_INET, &((sockaddr_in*)p->ai_addr)->sin_addr, ip, sizeof(ip));
+                char ip[64]; inet_ntop(AF_INET, &((sockaddr_in*)p->ai_addr)->sin_addr, ip, sizeof(ip));
                 printf("    http://%s:%d\n", ip, port);
             }
             freeaddrinfo(res);
         }
         printf("    http://localhost:%d\n", port);
-
-        fd_set readfds;
-        timeval tv;
+        fd_set readfds; timeval tv;
         while (running) {
-            FD_ZERO(&readfds);
-            FD_SET(srv, &readfds);
+            FD_ZERO(&readfds); FD_SET(srv, &readfds);
             tv.tv_sec = 1; tv.tv_usec = 0;
             if (select(0, &readfds, nullptr, nullptr, &tv) > 0) {
                 SOCKET client = accept(srv, nullptr, nullptr);
-                if (client != INVALID_SOCKET)
-                    std::thread(HandleClient, client).detach();
+                if (client != INVALID_SOCKET) std::thread(HandleClient, client).detach();
             }
         }
-        closesocket(srv);
-        WSACleanup();
+        closesocket(srv); WSACleanup();
     }
 
-    static void Start() {
-        std::thread(ServerThread).detach();
-    }
+    static void Start() { std::thread(ServerThread).detach(); }
 }
 
 
@@ -1340,6 +1738,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     std::thread dataThread([&]() {
         while (Radar::running) {
             { std::lock_guard<std::mutex> lock(g_dataMutex); ReadPlayers(); }
+            ApplyFeatures();
             Sleep(10 + (GetTickCount() % 5));
         }
     });
