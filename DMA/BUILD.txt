@@ -1,0 +1,118 @@
+=== Coopyy DMA Build Instructions ===
+
+This is the DMA (RADAR PC) version of Coopyy.
+Runs on PC2 and reads PC1's game memory via the CaptainDMA 75T card.
+Inherently STREAMPROOF - overlay renders on RADAR PC only.
+
+== Prerequisites ==
+
+1. Visual Studio 2022 with C++ Desktop workload
+2. Copy these DLLs next to the built exe (from LoneDMATest or MemProcFS):
+   - vmm.dll
+   - leechcore.dll
+   - FTD3XX.dll
+   - dbghelp.dll
+   - symsrv.dll
+3. Copy vmm.lib and leechcore.lib to DMA/libs/ (from MemProcFS SDK)
+   OR use dynamic loading (LoadLibrary/GetProcAddress)
+
+== Build - CoopyyDMA.exe (runs on PC2 / RADAR PC) ==
+
+Option A: Visual Studio
+  - Open coopyy_dll.sln, add a new Console Application project "CoopyyDMA"
+  - Add all DMA/*.h and DMA/dma_main.cpp to the project
+  - Include paths: DMA/, external/
+  - Link: vmm.lib, leechcore.lib, ws2_32.lib
+  - Build x64 Release
+
+Option B: Command Line (Developer Command Prompt)
+  cl /EHsc /O2 /std:c++17 /I"." /I".." dma_main.cpp /link vmm.lib leechcore.lib ws2_32.lib /OUT:CoopyyDMA.exe
+
+== Build - stealth_menu.exe (runs on PC1 / Main PC) ==
+
+  cl /EHsc /O2 stealth_menu.cpp /link user32.lib shell32.lib wininet.lib /OUT:stealth_menu.exe
+
+  Copy stealth_menu.exe to PC1 (the gaming PC).
+
+== Usage ==
+
+  On PC2 (RADAR):
+    CoopyyDMA.exe              - Run cheat + web menu server
+    CoopyyDMA.exe --dump       - Dump all Unturned modules (PE dumper)
+    CoopyyDMA.exe --dump Game.exe  - Dump modules from a different game
+
+  On PC1 (Main):
+    stealth_menu.exe 192.168.1.X        - Connect to RADAR PC web menu
+    stealth_menu.exe 192.168.1.X 7337   - Custom port
+
+    The stealth client:
+      1. Waits for DMA server to come online
+      2. Opens browser to the web menu
+      3. Applies WDA_EXCLUDEFROMCAPTURE to the browser window
+      4. Menu is now invisible to anti-cheat screenshots
+
+    Hotkeys on PC1:
+      HOME  - toggle menu visibility (hide/show)
+      END   - exit stealth client
+
+== Web Menu ==
+
+When CoopyyDMA.exe starts on PC2, it launches an HTTP server on port 7337.
+Access it from any browser on your LAN at http://<PC2_IP>:7337
+
+The web menu lets you toggle all 28 features and adjust sliders in real-time.
+Changes take effect immediately - no restart needed.
+
+NOTE: Windows Firewall on PC2 may block the port. Allow it through:
+  netsh advfirewall firewall add rule name="CoopyyDMA" dir=in action=allow protocol=TCP localport=7337
+
+== DMA Setup ==
+
+1. DMA card (CaptainDMA 75T) must be installed in PC1's PCIe slot
+2. USB Data cable connected from DMA card to THIS PC (PC2)
+3. Unturned must be running on PC1
+4. Run CoopyyDMA.exe on this PC
+5. Run stealth_menu.exe on PC1 with PC2's IP address
+
+== Features (ALL 28 preserved) ==
+
+  - Aimbot, Silent Aim, Triggerbot
+  - ESP (Players, Vehicles, Zombies, Items)
+  - No Recoil, No Spread, Rapid Fire, Infinite Range
+  - God Mode, Speed Hack, Fly Hack, Super Jump
+  - Admin Mode, No Fall Damage, No Scope Sway, No Flinch
+  - Fullbright, FOV Changer, Instant Reload, Radar
+  - Spin Bot, Extended Melee, Vehicle Fly
+  - Chams (DMA memory-write based, no Mono calls)
+  - Stream Proof toggle (always effective - overlay on PC2)
+
+DMA adaptations:
+  - Chams: writes material _Color directly in memory instead of mono_runtime_invoke
+  - Triggerbot: snaps aim via yaw/pitch writes when target is in crosshair
+  - Vehicle Fly: direct transform position/rotation writes via DMA
+  - Stream Proof: inherently on (PC2 overlay), toggle kept for compatibility
+
+== Streamproof ==
+
+Since the overlay renders entirely on the RADAR PC (PC2), it is
+inherently invisible to:
+  - OBS/streaming software on PC1
+  - Screen capture by anti-cheat on PC1
+  - Windows display affinity checks on PC1
+  - Any recording/streaming running on the target machine
+
+The web menu on PC1 is protected by SetWindowDisplayAffinity
+(WDA_EXCLUDEFROMCAPTURE) via the stealth_menu.exe client. This makes the
+browser window appear as solid black to any screen capture including
+anti-cheat screenshots, OBS, Discord screen share, and PrintScreen.
+
+== PE Dumper ==
+
+The --dump mode dumps all loaded modules from the target process via DMA.
+Output goes to DMA_Dump_<PID>/ folder. Dumped files are ready for IDA Pro
+with section headers patched for raw format.
+
+Works with ANY game/process - just specify the process name:
+  CoopyyDMA.exe --dump cs2.exe
+  CoopyyDMA.exe --dump EscapeFromTarkov.exe
+  CoopyyDMA.exe --dump valorant.exe

@@ -1,0 +1,24 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.opensdf
+*.sdf
+*.ipch
+
+# Build output (project-level)
+/bin/
+/obj/
+/Debug/
+/Release/
+/x64/
+/x86/
+
+# Temp files
+*.ilk
+*.tlog
+*.log
+
+# Game dumps
+Dumps/
+game_dumps/
