@@ -57,6 +57,7 @@ Last updated: 2026-07-02
 | unturned_internal | `Unturned/source/unturned_internal.cpp` | `Unturned/binaries/unturned_internal.dll` | Unturned | Internal (DLL) | Same features as external, in-process via `mem_internal.hpp` |
 | apex_external | `PenisFinger/source/cheat/apex_external.cpp` | `PenisFinger/build/apex_external.exe` | Apex Legends | External | |
 | df_external | `PenisFinger/source/cheat/deltaforce_external.cpp` | `PenisFinger/build/df_external.exe` | Delta Force | External | |
+| dma_radar | `PenisFinger/source/cheat/dma_radar.cpp` | — | R6 Siege, Rust, Apex, BF2042, Tarkov, PUBG, CS2, Hunt Showdown, Valorant | DMA (FPGA) | Universal DMA radar — per-game offset configs in `cheat/dma/`. Supports UE4/UE5, Source 2, Unity, CryEngine, Frostbite |
 | BetestClient | `Unturned/source/BetestClient.cpp` | `Unturned/binaries/BetestClient.exe` | — | — | Driver communication test client |
 | df_dma | `cheat/dma/deltaforce_dma.cpp` | — | Delta Force | DMA Radar | FPGA DMA via vmm.dll — runs on PC2, 2D radar + player list |
 | abi_dma | `cheat/dma/arenabreakout_dma.cpp` | — | Arena Breakout: Infinite | DMA Radar | FPGA DMA via vmm.dll — player radar + loot radar |
@@ -152,6 +153,14 @@ struct NalOp {
 | Apex Legends | EAC | Blocked | Works (VM only) | Works |
 | Delta Force | EAC | Blocked | Works (VM only) | Works — `deltaforce_dma.cpp` |
 | Arena Breakout: Infinite | ACE | Blocked | N/A | Works — `arenabreakout_dma.cpp` |
+| Rainbow Six Siege | BattlEye | — | — | Works |
+| Rust | EAC | Blocked | — | Works |
+| Battlefield 2042 | EA AntiCheat | — | — | Works |
+| Escape From Tarkov | BattlEye | — | — | Works |
+| PUBG | BattlEye | — | — | Works |
+| Counter-Strike 2 | VAC | — | — | Works |
+| Hunt: Showdown | EAC | — | — | Works |
+| Valorant | Vanguard | — | — | Works |
 
 ### Host Machine
 - CPU: Intel i9-12900K (VT-x on, VT-d off)
