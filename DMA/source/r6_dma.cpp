@@ -173,8 +173,6 @@ namespace O {
     uint64_t StatusManagerLocalEntity;
     // Level / actor array
     uint64_t PersistentLevel, Actors, ActorCount;
-    // Direct entity reads (AnvilNext — no pawn indirection)
-    uint64_t DirectPosition, DirectHeadPosition;
     // Actor
     uint64_t RootComponent, ActorMesh, RelativeLocation;
     uint64_t ComponentToWorld, ComponentToWorldMatrix;
@@ -200,6 +198,7 @@ namespace O {
     // Core (GWorld-style, used if sig scan provides them)
     uint64_t GWorld, OwningGameInstance, LocalPlayers, PlayerController;
     uint64_t AcknowledgedPawn, PlayerCameraManager;
+    uint64_t MapName;
 
     void Init() {
         // Manager singletons
@@ -222,12 +221,6 @@ namespace O {
         PersistentLevel        = Off("PersistentLevel", 0x0);
         Actors                 = Off("Actors", 0x0);
         ActorCount             = Off("ActorCount", 0x0);
-        // EntityList/EntityCount are aliases for Actors/ActorCount
-        if (!Actors)     Actors     = Off("EntityList", 0x0);
-        if (!ActorCount) ActorCount = Off("EntityCount", 0x0);
-        // Direct entity reads (skip pawn indirection)
-        DirectPosition         = Off("DirectPosition", 0x0);
-        DirectHeadPosition     = Off("DirectHeadPosition", 0x0);
         // Actor
         RootComponent          = Off("RootComponent", 0x0);
         ActorMesh              = Off("ActorMesh", 0x0);
@@ -286,6 +279,7 @@ namespace O {
         PlayerController       = Off("PlayerController", 0x0);
         AcknowledgedPawn       = Off("AcknowledgedPawn", 0x0);
         PlayerCameraManager    = Off("PlayerCameraManager", 0x0);
+        MapName                = Off("MapName", 0x0);
     }
 }
 
@@ -543,10 +537,9 @@ static int g_allPlayerCount = 0;
 static uint64_t g_localPawn = 0;
 static uint64_t g_playerController = 0;
 static uint64_t g_gameManager = 0;
+static char     g_mapName[128] = "";
 
 static Vec3 GetEntityPosition(uint64_t entity) {
-    if (O::DirectPosition)
-        return rpm<Vec3>(entity + O::DirectPosition);
     if (O::EntityPawn) {
         uint64_t pawn = ReadEncPtr(entity + O::EntityPawn);
         if (pawn && O::RootComponent) {
@@ -566,8 +559,6 @@ static Vec3 GetEntityPosition(uint64_t entity) {
 }
 
 static Vec3 GetEntityHeadPos(uint64_t entity) {
-    if (O::DirectHeadPosition)
-        return rpm<Vec3>(entity + O::DirectHeadPosition);
     if (O::EntityPawn && O::SkeletonHeadPosition) {
         uint64_t pawn = ReadEncPtr(entity + O::EntityPawn);
         if (pawn) return rpm<Vec3>(pawn + O::SkeletonHeadPosition);
@@ -633,6 +624,16 @@ static void ReadPlayersAnvilNext() {
     if (!gameMgr) gameMgr = gameMgrAddr;
     if (gameMgr < 0x10000) return;
     g_gameManager = gameMgr;
+
+    if (O::MapName) {
+        uint64_t mapStrPtr = rpm<uint64_t>(gameMgr + O::MapName);
+        if (mapStrPtr > 0x10000) {
+            char mapBuf[128] = {};
+            DmaRead(mapStrPtr, mapBuf, 127);
+            if (mapBuf[0] >= 0x20 && mapBuf[0] < 0x7f)
+                strncpy_s(g_mapName, mapBuf, 127);
+        }
+    }
 
     uint64_t entityList = 0;
     if (O::Actors) {
@@ -1038,6 +1039,7 @@ namespace WebMenu {
         std::lock_guard<std::mutex> lock(g_dataMutex);
         std::ostringstream js;
         js << "{\"game\":\"R6 Siege\","
+           << "\"map\":\"" << g_mapName << "\","
            << "\"count\":" << g_playerCount << ","
            << "\"range\":200,"
            << "\"local\":{\"x\":" << g_localPos.x << ",\"y\":" << g_localPos.y
@@ -1165,14 +1167,20 @@ body{background:#0a0a0f;color:#ccc;font-family:'Consolas','Courier New',monospac
 #spb{padding:8px 24px;border:1px solid #333;border-radius:6px;background:transparent;color:#666;cursor:pointer;font-family:inherit;font-size:11px;margin-top:14px}
 #spb:hover{color:#aaa;border-color:#555}
 #wrap{display:flex;height:100vh;width:100vw}
-#radar-box{flex:1;display:flex;align-items:center;justify-content:center;min-width:0}
-canvas{display:block;border-radius:50%}
+#radar-box{flex:1;display:flex;align-items:center;justify-content:center;min-width:0;position:relative}
+canvas{display:block}
 #side{width:280px;padding:14px;overflow-y:auto;background:#0e0e16;border-left:1px solid #1a1a2a}
 #hdr{font-size:16px;font-weight:bold;color:#ff6040;margin-bottom:2px}
 #sub{font-size:11px;color:#666;margin-bottom:8px}
 .sep{height:1px;background:#222;margin:8px 0}
-#swb{width:100%;padding:6px;border:1px solid #333;border-radius:4px;background:#14141e;color:#aaa;cursor:pointer;font-family:inherit;font-size:11px;margin-bottom:8px}
-#swb:hover{border-color:#ff6040;color:#fff}
+#swb,#mvb{width:100%;padding:6px;border:1px solid #333;border-radius:4px;background:#14141e;color:#aaa;cursor:pointer;font-family:inherit;font-size:11px;margin-bottom:8px}
+#swb:hover,#mvb:hover{border-color:#ff6040;color:#fff}
+#mvb.active{background:#2a1520;border-color:#ff6040;color:#ff6040}
+#floors{display:none;margin-bottom:8px}
+#floors button{padding:4px 12px;border:1px solid #333;border-radius:4px;background:#14141e;color:#888;cursor:pointer;font-family:inherit;font-size:11px;margin-right:4px}
+#floors button.act{background:#2a1520;border-color:#ff6040;color:#ff6040}
+#floors button:hover{border-color:#ff6040;color:#ccc}
+#mapinfo{font-size:10px;color:#555;margin-bottom:6px;display:none}
 .pl{font-size:11px;margin-bottom:2px}
 .pl .nm{color:#ff9090}
 .pl .nm.fr{color:#66cc88}
@@ -1191,6 +1199,9 @@ canvas{display:block;border-radius:50%}
   <div id="hdr">SQUAD RADAR</div>
   <div id="sub">Waiting for data...</div>
   <button id="swb" onclick="showOv()">Switch Player</button>
+  <button id="mvb" onclick="toggleView()">Switch to Map View</button>
+  <div id="floors"></div>
+  <div id="mapinfo"></div>
   <div class="sep"></div>
   <div id="plist"></div>
 </div>
@@ -1198,14 +1209,63 @@ canvas{display:block;border-radius:50%}
 <div id="ft">Squad radar &bull; /radar</div>
 <script>
 const C=document.getElementById('c'),X=C.getContext('2d');
-let D={game:'',count:0,range:200,local:{x:0,y:0,z:0,yaw:0,team:0},scale:100,players:[]};
+let D={game:'',map:'',count:0,range:200,local:{x:0,y:0,z:0,yaw:0,team:0},scale:100,players:[]};
 let sel=localStorage.getItem('rp'),fails=0,spectate=false;
 let prev={},cYaw=0,cPos={x:0,y:0,z:0};
+let mapMode=localStorage.getItem('mapMode')==='1';
+let curFloor=1;
+
+const R6MAPS={
+  'bank':{floors:[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650},{n:'Roof',zMin:650,zMax:1200}]},
+  'border':{floors:[{n:'1F',zMin:-100,zMax:300},{n:'2F',zMin:300,zMax:650},{n:'Roof',zMin:650,zMax:1200}]},
+  'chalet':{floors:[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'clubhouse':{floors:[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650},{n:'Roof',zMin:650,zMax:1200}]},
+  'coastline':{floors:[{n:'1F',zMin:-100,zMax:300},{n:'2F',zMin:300,zMax:650},{n:'Roof',zMin:650,zMax:1200}]},
+  'consulate':{floors:[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'house':{floors:[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'kafe':{floors:[{n:'1F',zMin:-100,zMax:300},{n:'2F',zMin:300,zMax:650},{n:'3F',zMin:650,zMax:1000}]},
+  'kanal':{floors:[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'oregon':{floors:[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'outback':{floors:[{n:'1F',zMin:-100,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'skyscraper':{floors:[{n:'1F',zMin:-100,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'themepark':{floors:[{n:'1F',zMin:-100,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'villa':{floors:[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'emeraldplains':{floors:[{n:'1F',zMin:-100,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'lair':{floors:[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'nighthavenlabs':{floors:[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'closequarter':{floors:[{n:'1F',zMin:-100,zMax:300},{n:'2F',zMin:300,zMax:650}]},
+  'stack':{floors:[{n:'1F',zMin:-100,zMax:300},{n:'2F',zMin:300,zMax:650}]}
+};
+const DEFAULT_FLOORS=[{n:'B',zMin:-400,zMax:-50},{n:'1F',zMin:-50,zMax:300},{n:'2F',zMin:300,zMax:650},{n:'Roof',zMin:650,zMax:1200}];
+
+function getMapKey(){
+  if(!D.map)return null;
+  const m=D.map.toLowerCase().replace(/[^a-z0-9]/g,'');
+  for(const k in R6MAPS){if(m.includes(k))return k}
+  return null;
+}
+function getFloors(){const k=getMapKey();return k?R6MAPS[k].floors:DEFAULT_FLOORS}
 
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/'/g,'&#39;')}
 function showOv(){document.getElementById('ov').classList.remove('h');buildBtns()}
 function specMode(){sel=null;spectate=true;localStorage.removeItem('rp');document.getElementById('ov').classList.add('h')}
 function pick(n){sel=n;spectate=false;localStorage.setItem('rp',n);document.getElementById('ov').classList.add('h')}
+
+function toggleView(){
+  mapMode=!mapMode;localStorage.setItem('mapMode',mapMode?'1':'0');
+  document.getElementById('mvb').textContent=mapMode?'Switch to Radar View':'Switch to Map View';
+  document.getElementById('mvb').classList.toggle('active',mapMode);
+  document.getElementById('floors').style.display=mapMode?'block':'none';
+  document.getElementById('mapinfo').style.display=mapMode?'block':'none';
+  C.style.borderRadius=mapMode?'8px':'50%';
+  updateFloorBtns();
+}
+function setFloor(i){curFloor=i;updateFloorBtns()}
+function updateFloorBtns(){
+  const fl=getFloors(),el=document.getElementById('floors');
+  let h='';for(let i=0;i<fl.length;i++)h+='<button class="'+(i===curFloor?'act':'')+'" onclick="setFloor('+i+')">'+fl[i].n+'</button>';
+  el.innerHTML=h;
+}
 
 function buildBtns(){
   const g=document.getElementById('pg');if(!D.players||!D.players.length){g.innerHTML='<p style="color:#555">Waiting for player data...</p>';return}
@@ -1224,11 +1284,18 @@ function estYaw(n,x,y){
   return(prev[n]||{}).yaw||0;
 }
 
-function sz(){const b=document.getElementById('radar-box'),s=Math.min(b.clientWidth,b.clientHeight)-20,dpr=window.devicePixelRatio||1;C.width=s*dpr;C.height=s*dpr;C.style.width=s+'px';C.style.height=s+'px';X.setTransform(dpr,0,0,dpr,0,0);return s}
+function sz(){
+  const b=document.getElementById('radar-box');
+  const bw=b.clientWidth-20,bh=b.clientHeight-20;
+  const s=mapMode?Math.min(bw,bh):Math.min(bw,bh);
+  const dpr=window.devicePixelRatio||1;
+  C.width=s*dpr;C.height=s*dpr;C.style.width=s+'px';C.style.height=s+'px';
+  X.setTransform(dpr,0,0,dpr,0,0);return s;
+}
 window.addEventListener('resize',()=>sz());
 function deg2rad(d){return d*Math.PI/180}
 
-function draw(){
+function drawRadar(){
   const s=sz(),cx=s/2,cy=s/2,r=s/2-10;
   X.clearRect(0,0,s,s);
   X.beginPath();X.arc(cx,cy,r,0,Math.PI*2);X.fillStyle='#0d140d';X.fill();
@@ -1261,6 +1328,97 @@ function draw(){
     const scale=r/range;let px=cx+rx*scale,py=cy-ry*scale;const dd=Math.sqrt((px-cx)**2+(py-cy)**2);if(dd>r-6)continue;
     X.save();X.translate(px,py);X.rotate(Math.PI/4);X.fillStyle=it.r>=3?'#ffaa00':it.r>=2?'#8888ff':'#88aa88';X.fillRect(-3,-3,6,6);X.restore();
   }}
+}
+
+function drawMap(){
+  const s=sz(),pad=40,lt=D.local?D.local.team:0,sc=D.scale||100;
+  const floors=getFloors();
+  const fl=floors[curFloor]||floors[0];
+  X.clearRect(0,0,s,s);
+
+  let mnX=Infinity,mxX=-Infinity,mnY=Infinity,mxY=-Infinity;
+  const all=D.players||[];
+  for(const p of all){
+    if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;
+    if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;
+  }
+  if(sel&&!spectate){
+    const sp=all.find(p=>p.n===sel);
+    if(sp){if(sp.x<mnX)mnX=sp.x;if(sp.x>mxX)mxX=sp.x;if(sp.y<mnY)mnY=sp.y;if(sp.y>mxY)mxY=sp.y;}
+  }
+  mnX-=500;mxX+=500;mnY-=500;mxY+=500;
+  if(cPos.x){mnX=Math.min(mnX,cPos.x-500);mxX=Math.max(mxX,cPos.x+500);mnY=Math.min(mnY,cPos.y-500);mxY=Math.max(mxY,cPos.y+500)}
+  const rangeX=mxX-mnX||1000,rangeY=mxY-mnY||1000;
+  const drawW=s-pad*2,drawH=s-pad*2;
+  const scaleF=Math.min(drawW/rangeX,drawH/rangeY);
+  const offX=pad+(drawW-rangeX*scaleF)/2,offY=pad+(drawH-rangeY*scaleF)/2;
+  function toScreen(wx,wy){return{x:offX+(wx-mnX)*scaleF,y:offY+(mxY-wy)*scaleF}}
+
+  X.fillStyle='#0a100a';X.fillRect(0,0,s,s);
+  X.strokeStyle='#182018';X.lineWidth=1;
+  const gridStep=Math.max(100,Math.pow(10,Math.floor(Math.log10(rangeX/5))));
+  const gStart=Math.floor(mnX/gridStep)*gridStep;
+  for(let gx=gStart;gx<=mxX;gx+=gridStep){const p=toScreen(gx,0);X.beginPath();X.moveTo(p.x,pad);X.lineTo(p.x,s-pad);X.stroke()}
+  const gStartY=Math.floor(mnY/gridStep)*gridStep;
+  for(let gy=gStartY;gy<=mxY;gy+=gridStep){const p=toScreen(0,gy);X.beginPath();X.moveTo(pad,p.y);X.lineTo(s-pad,p.y);X.stroke()}
+
+  X.strokeStyle='#2a3a2a';X.lineWidth=2;X.strokeRect(offX,offY,rangeX*scaleF,rangeY*scaleF);
+
+  const mapKey=getMapKey();
+  X.font='14px Consolas';X.fillStyle='#3a5a3a';X.textAlign='center';X.textBaseline='top';
+  X.fillText((mapKey?mapKey.toUpperCase():(D.map||'UNKNOWN'))+' - '+fl.n,s/2,8);
+
+  X.font='9px Consolas';X.fillStyle='#2a3a2a';X.textAlign='left';X.textBaseline='top';
+  const gridM=Math.round(gridStep/100);
+  X.fillText(gridM+'m grid',pad,s-pad+4);
+
+  X.font='12px Consolas';X.fillStyle='#3a5a3a';X.textAlign='center';X.textBaseline='bottom';
+  X.fillText('N',s/2,pad-4);
+  X.beginPath();X.moveTo(s/2,pad);X.lineTo(s/2-5,pad+10);X.lineTo(s/2+5,pad+10);X.closePath();X.fillStyle='#3a5a3a';X.fill();
+
+  if(cPos.x||cPos.y){
+    const me=toScreen(cPos.x,cPos.y);
+    const onFloor=cPos.z>=fl.zMin&&cPos.z<fl.zMax;
+    if(onFloor){
+      X.beginPath();X.arc(me.x,me.y,7,0,Math.PI*2);X.fillStyle='#00c8ff';X.fill();
+      X.strokeStyle='rgba(0,200,255,0.3)';X.lineWidth=1;X.beginPath();X.arc(me.x,me.y,20,0,Math.PI*2);X.stroke();
+      const yr=deg2rad(cYaw);
+      X.beginPath();X.moveTo(me.x,me.y);X.lineTo(me.x+Math.cos(yr)*18,me.y-Math.sin(yr)*18);X.strokeStyle='#00c8ff';X.lineWidth=2;X.stroke();
+    }else{
+      X.beginPath();X.arc(me.x,me.y,5,0,Math.PI*2);X.strokeStyle='rgba(0,200,255,0.3)';X.lineWidth=1;X.stroke();
+    }
+  }
+
+  for(const p of all){
+    if(p.n===sel&&!spectate)continue;
+    const ps=toScreen(p.x,p.y);
+    const onFloor=p.z>=fl.zMin&&p.z<fl.zMax;
+    const hpp=p.mhp>0?p.hp/p.mhp:1;
+    const isF=p.t===lt;
+    const col=isF?'#33dd66':(hpp<.3?'#ffff00':'#ff3232');
+
+    if(onFloor){
+      const ds=6;
+      X.beginPath();X.arc(ps.x,ps.y,ds,0,Math.PI*2);X.fillStyle=col;X.fill();X.strokeStyle='rgba(0,0,0,0.6)';X.lineWidth=1;X.stroke();
+      const ey=estYaw(p.n||('p'+p.t),p.x,p.y);
+      if(ey){const yr=deg2rad(ey);X.beginPath();X.moveTo(ps.x,ps.y);X.lineTo(ps.x+Math.cos(yr)*12,ps.y-Math.sin(yr)*12);X.strokeStyle=col;X.lineWidth=1.5;X.stroke()}
+      X.font='10px Consolas';X.textAlign='center';X.textBaseline='bottom';X.fillStyle='#fff';X.fillText(p.n||'Player',ps.x,ps.y-ds-4);
+      X.fillStyle='#aaa';X.font='9px Consolas';X.fillText(Math.round(p.d)+'m',ps.x,ps.y+ds+12);
+      const bw=24;X.fillStyle='#1a1a1a';X.fillRect(ps.x-bw/2,ps.y+ds+2,bw,3);
+      const cr2=Math.round(255*(1-hpp)),cg2=Math.round(255*hpp);X.fillStyle='rgb('+cr2+','+cg2+',0)';X.fillRect(ps.x-bw/2,ps.y+ds+2,bw*hpp,3);
+    }else{
+      X.beginPath();X.arc(ps.x,ps.y,4,0,Math.PI*2);X.strokeStyle=col;X.globalAlpha=0.35;X.lineWidth=1;X.stroke();X.globalAlpha=1;
+      const flIdx=floors.findIndex(f=>p.z>=f.zMin&&p.z<f.zMax);
+      if(flIdx>=0){X.font='8px Consolas';X.fillStyle=col;X.globalAlpha=0.5;X.textAlign='center';X.textBaseline='top';X.fillText(floors[flIdx].n,ps.x,ps.y+6);X.globalAlpha=1}
+    }
+  }
+
+  const mi=document.getElementById('mapinfo');
+  mi.textContent='Floor: '+fl.n+' (Z: '+fl.zMin+' to '+fl.zMax+')  |  '+(mapKey||'auto-scale');
+}
+
+function draw(){
+  if(mapMode)drawMap();else drawRadar();
   requestAnimationFrame(draw);
 }
 
@@ -1275,16 +1433,18 @@ async function poll(){
     }else{cPos=D.local||cPos;cYaw=D.local?(D.local.yaw||0):0}
     if(!sel&&!spectate&&D.players.length>0&&!document.getElementById('ov').classList.contains('h'))buildBtns();
     document.getElementById('hdr').textContent=(sel&&!spectate?sel+' RADAR':(D.game||'DMA')+' RADAR');
-    document.getElementById('sub').textContent='Players: '+D.players.length+'  Range: '+(D.range||200)+'m';
+    document.getElementById('sub').textContent='Players: '+D.players.length+(D.map?' | Map: '+D.map:'');
     const lt=D.local?D.local.team:0;const pl=document.getElementById('plist');let h='';
     for(const p of D.players.slice(0,20)){const nm=p.n||'Player',hpp=p.mhp>0?p.hp/p.mhp:1;const cr=Math.round(255*(1-hpp)),cg=Math.round(255*hpp);const isF=p.t===lt;
       h+='<div class="pl"><span class="nm'+(isF?' fr':'')+'">'+nm+(p.n===sel?' (YOU)':'')+'</span><span class="dst">'+Math.round(p.d)+'m</span> '+p.hp+'/'+p.mhp+'</div>';
       h+='<div class="hp"><div style="width:'+Math.round(hpp*100)+'%;background:rgb('+cr+','+cg+',0)"></div></div>'}
     pl.innerHTML=h;
+    if(mapMode)updateFloorBtns();
   }catch(e){fails++;document.getElementById('sub').textContent='Disconnected ('+fails+')'}
   setTimeout(poll,100);
 }
 if(sel)document.getElementById('ov').classList.add('h');
+if(mapMode){document.getElementById('mvb').textContent='Switch to Radar View';document.getElementById('mvb').classList.add('active');document.getElementById('floors').style.display='block';document.getElementById('mapinfo').style.display='block';C.style.borderRadius='8px';updateFloorBtns()}
 draw();poll();
 </script>
 </body></html>)RADAR";
@@ -1461,14 +1621,28 @@ draw();poll();
 </script>
 </body></html>)HTML";
 
+    static bool IsLocalhost(SOCKET s) {
+        sockaddr_in peer = {};
+        int len = sizeof(peer);
+        if (getpeername(s, (sockaddr*)&peer, &len) != 0) return false;
+        return (ntohl(peer.sin_addr.s_addr) == 0x7F000001);
+    }
+
     static void HandleClient(SOCKET client) {
         char buf[8192];
         int n = recv(client, buf, sizeof(buf)-1, 0);
         if (n <= 0) { closesocket(client); return; }
         buf[n] = 0;
 
+        bool local = IsLocalhost(client);
+        static const char* FORBIDDEN =
+            "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n"
+            "Content-Length: 42\r\nConnection: close\r\n\r\n"
+            "Admin panel is only available on localhost";
+
         std::string response;
         if (strstr(buf, "POST /api/set")) {
+            if (!local) { send(client, FORBIDDEN, (int)strlen(FORBIDDEN), 0); closesocket(client); return; }
             char* body = strstr(buf, "\r\n\r\n");
             if (body) { body += 4; HandleToggle(body); }
             response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
@@ -1488,6 +1662,7 @@ draw();poll();
                        "Connection: close\r\n\r\n" + body;
         } else if (strstr(buf, "GET / ") || strstr(buf, "GET / HTTP") ||
                    strstr(buf, "GET /index") || strstr(buf, "GET /menu")) {
+            if (!local) { send(client, FORBIDDEN, (int)strlen(FORBIDDEN), 0); closesocket(client); return; }
             std::string body = HTML_PAGE;
             response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
                        "Cache-Control: no-cache\r\n"
@@ -1518,17 +1693,15 @@ draw();poll();
         char hostname[256]; gethostname(hostname, sizeof(hostname));
         addrinfo hints = {}, *res = nullptr; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
         if (getaddrinfo(hostname, nullptr, &hints, &res) == 0) {
-            printf("[+] Admin panel (you):    http://localhost:%d\n", port);
-            printf("[+] Shared radar (squad): http://localhost:%d/radar\n", port);
-            printf("[+] LAN URLs:\n");
+            printf("[+] Admin panel (localhost only): http://localhost:%d\n", port);
+            printf("[+] Shared radar (anyone on LAN):\n");
             for (auto* p = res; p; p = p->ai_next) {
                 char ip[64]; inet_ntop(AF_INET, &((sockaddr_in*)p->ai_addr)->sin_addr, ip, sizeof(ip));
-                printf("    Admin:  http://%s:%d\n", ip, port);
-                printf("    Radar:  http://%s:%d/radar\n", ip, port);
+                printf("    http://%s:%d/radar\n", ip, port);
             }
             freeaddrinfo(res);
         } else {
-            printf("[+] Admin panel:  http://localhost:%d\n", port);
+            printf("[+] Admin panel (localhost only): http://localhost:%d\n", port);
             printf("[+] Shared radar: http://localhost:%d/radar\n", port);
         }
         fd_set readfds; timeval tv;
