@@ -301,8 +301,18 @@ namespace O {
     uint64_t GameRules, PlayerResource;
     uint64_t Pawn_Health, Pawn_Team, Pawn_Position;
 
-    // Pointer chain style: "ue" (GWorld chain) or "entitylist" (Source 2 / Frostbite)
+    // Pointer chain style: "ue" | "entitylist" | "unity" | "anvilnext"
     std::string engine;
+
+    // Write-target offsets
+    uint64_t GlowEnable, GlowThroughWalls, GlowColor;
+    uint64_t ControlRotation, RecoilPitch, RecoilYaw;
+    uint64_t ViewAngles, FireRate, SpreadAngle;
+    uint64_t ChamsEnable, ChamsThroughWalls, ChamsColor;
+    uint64_t FlashAlpha, FlashMaxAlpha, SwayScale;
+    uint64_t Stamina, MaxStamina, MovementSpeed, MaxWalkSpeed;
+    uint64_t JumpZVelocity, ThirdPersonOffset;
+    uint64_t DefaultMaxWalkSpeed, DefaultJumpZ;
 
     void Init() {
         engine = Str("Engine", "ue");
@@ -367,16 +377,6 @@ namespace O {
         DefaultMaxWalkSpeed    = Off("DefaultMaxWalkSpeed");
         DefaultJumpZ           = Off("DefaultJumpZ");
     }
-
-    // Write-target offsets
-    uint64_t GlowEnable, GlowThroughWalls, GlowColor;
-    uint64_t ControlRotation, RecoilPitch, RecoilYaw;
-    uint64_t ViewAngles, FireRate, SpreadAngle;
-    uint64_t ChamsEnable, ChamsThroughWalls, ChamsColor;
-    uint64_t FlashAlpha, FlashMaxAlpha, SwayScale;
-    uint64_t Stamina, MaxStamina, MovementSpeed, MaxWalkSpeed;
-    uint64_t JumpZVelocity, ThirdPersonOffset;
-    uint64_t DefaultMaxWalkSpeed, DefaultJumpZ;
 }
 
 
@@ -451,6 +451,9 @@ static PlayerData   g_players[128];
 static int          g_playerCount = 0;
 static std::mutex   g_dataMutex;
 static float        g_unitScale = 1.0f;  // cm->m conversion (100 for UE, 1 for Source)
+static uint64_t     g_actorPtrs[128] = {};
+static uint64_t     g_localPawn = 0;
+static uint64_t     g_playerController = 0;
 
 static Vec3 GetActorLocation(uint64_t actor) {
     if (O::Pawn_Position) return rpm<Vec3>(actor + O::Pawn_Position);
@@ -692,17 +695,125 @@ static void ReadPlayers_Unity() {
     g_playerCount = count;
 }
 
-static void ReadPlayers() {
-    memset(g_actorPtrs, 0, sizeof(g_actorPtrs));
-    if (O::engine == "entitylist")    ReadPlayers_EntityList();
-    else if (O::engine == "unity")   ReadPlayers_Unity();
-    else                             ReadPlayers_UE();
+// AnvilNext 2.0 reader (Rainbow Six Siege)
+static void ReadPlayers_AnvilNext() {
+    uint64_t gmRVA = Off("GameManager");
+    if (!gmRVA) return;
+
+    uint64_t gmPtr = rpm<uint64_t>(g_base + gmRVA);
+    if (!gmPtr || gmPtr > 0x7FFFFFFFFFFF) return;
+
+    uint64_t entListOff  = Off("EntityList",      0x1C8);
+    uint64_t entCountOff = Off("EntityCount",      0x1D0);
+    uint64_t headOff     = Off("HeadPosition",     0x6A0);
+    uint64_t feetOff     = Off("FeetPosition",     0x700);
+    uint64_t replOff     = Off("Replication",      0xC8);
+    uint64_t teamIdOff   = Off("TeamID",           0x190);
+    uint64_t compChainOff= Off("ComponentChain",   0xD8);
+    uint64_t childCompOff= Off("ChildComponent",   0x8);
+    uint64_t healthOff   = Off("Health",           0x168);
+    uint64_t statusRVA   = Off("StatusManager");
+    uint64_t localEntOff = Off("LocalEntity",      0x28);
+
+    uint64_t entityList = rpm<uint64_t>(gmPtr + entListOff);
+    if (!entityList || entityList > 0x7FFFFFFFFFFF) return;
+
+    int32_t entityCount = rpm<int32_t>(gmPtr + entCountOff);
+    if (entityCount <= 0 || entityCount > 64) return;
+
+    uint64_t localEntity = 0;
+    if (statusRVA) {
+        uint64_t statusMgr = rpm<uint64_t>(g_base + statusRVA);
+        if (statusMgr && statusMgr < 0x7FFFFFFFFFFF)
+            localEntity = rpm<uint64_t>(statusMgr + localEntOff);
+    }
+
+    uint64_t grRVA = Off("GameRenderer");
+    bool hasCam = false;
+    if (grRVA) {
+        uint64_t gr = rpm<uint64_t>(g_base + grRVA);
+        if (gr && gr < 0x7FFFFFFFFFFF) {
+            uint64_t engLink = rpm<uint64_t>(gr + Off("EngineLink", 0x120));
+            if (engLink) {
+                uint64_t eng = rpm<uint64_t>(engLink + Off("CameraEngine", 0x1C8));
+                if (eng) {
+                    uint64_t cam = rpm<uint64_t>(eng + Off("CameraObject", 0x08));
+                    if (cam) {
+                        g_localPos = rpm<Vec3>(cam + Off("ViewTranslation", 0x100));
+                        Vec3 fwd = rpm<Vec3>(cam + Off("ViewForward", 0xF0));
+                        g_localYaw = RAD2DEG(atan2f(fwd.y, fwd.x));
+                        hasCam = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if (localEntity && localEntity < 0x7FFFFFFFFFFF) {
+        if (!hasCam) g_localPos = rpm<Vec3>(localEntity + headOff);
+        uint64_t repl = rpm<uint64_t>(localEntity + replOff);
+        if (repl && repl < 0x7FFFFFFFFFFF) g_localTeam = rpm<int>(repl + teamIdOff);
+        g_localPawn = localEntity;
+    } else if (!hasCam && entityCount > 0) {
+        uint64_t first = rpm<uint64_t>(entityList);
+        if (first && first < 0x7FFFFFFFFFFF) {
+            g_localPos = rpm<Vec3>(first + headOff);
+            localEntity = first;
+            g_localPawn = first;
+        }
+    }
+
+    int count = 0;
+    for (int i = 0; i < entityCount && count < 128; i++) {
+        uint64_t entity = rpm<uint64_t>(entityList + (uint64_t)i * 8);
+        if (!entity || entity > 0x7FFFFFFFFFFF) continue;
+        if (entity == localEntity) continue;
+
+        Vec3 headPos = rpm<Vec3>(entity + headOff);
+        if (headPos.x == 0.0f && headPos.y == 0.0f && headPos.z == 0.0f) continue;
+
+        int team = 0;
+        uint64_t repl = rpm<uint64_t>(entity + replOff);
+        if (repl && repl < 0x7FFFFFFFFFFF) team = rpm<int>(repl + teamIdOff);
+        if (team == g_localTeam && g_localTeam != 0) continue;
+
+        int hp = 100;
+        uint64_t compChain = rpm<uint64_t>(entity + compChainOff);
+        if (compChain && compChain < 0x7FFFFFFFFFFF) {
+            uint64_t child = rpm<uint64_t>(compChain + childCompOff);
+            if (child && child < 0x7FFFFFFFFFFF) {
+                float hpf = rpm<float>(child + healthOff);
+                if (hpf > 0.0f && hpf <= 200.0f) hp = (int)hpf;
+            }
+        }
+        if (hp <= 0) continue;
+
+        Vec3 feetPos = rpm<Vec3>(entity + feetOff);
+        float dist = Vec3Dist(g_localPos, headPos) / g_unitScale;
+        if (dist > 600.0f) continue;
+
+        PlayerData& p = g_players[count];
+        p.origin  = (feetPos.x != 0.0f || feetPos.y != 0.0f) ? feetPos : headPos;
+        p.headPos = headPos;
+        p.team    = team;
+        p.distance = dist;
+        p.health   = hp;
+        p.maxHealth = 100;
+        p.name[0]  = 0;
+        p.valid    = true;
+        g_actorPtrs[count] = entity;
+        count++;
+    }
+    g_playerCount = count;
 }
 
-// Store actor pointers for write-back features
-static uint64_t g_actorPtrs[128];
-static uint64_t g_localPawn = 0;
-static uint64_t g_playerController = 0;
+static void ReadPlayers() {
+    memset(g_actorPtrs, 0, sizeof(g_actorPtrs));
+    if (O::engine == "entitylist")       ReadPlayers_EntityList();
+    else if (O::engine == "unity")       ReadPlayers_Unity();
+    else if (O::engine == "anvilnext")   ReadPlayers_AnvilNext();
+    else                                 ReadPlayers_UE();
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DMA Write features — aimbot, glow, no-recoil, triggerbot, etc.
@@ -1547,13 +1658,13 @@ struct GameProfile {
     const char* displayName;
     const char* processName;
     const char* moduleName;
-    const char* engine;        // "ue" | "entitylist" | "unity"
+    const char* engine;        // "ue" | "entitylist" | "unity" | "anvilnext"
     float       unitScale;     // cm->m divisor
     COLORREF    themeColor;
 };
 
 static const GameProfile g_profiles[] = {
-    {"r6",            "Rainbow Six Siege",     "RainbowSix.exe",                        "RainbowSix.exe",                        "ue",         100.0f, RGB(100,180,255)},
+    {"r6",            "Rainbow Six Siege",     "RainbowSix.exe",                        "RainbowSix.exe",                        "anvilnext",    1.0f, RGB(100,180,255)},
     {"rust",          "Rust",                  "RustClient.exe",                         "GameAssembly.dll",                      "unity",        1.0f, RGB(200,120,50)},
     {"apex",          "Apex Legends",          "r5apex.exe",                             "r5apex.exe",                            "ue",           1.0f, RGB(255,50,50)},
     {"bf2042",        "Battlefield 2042",      "BF2042.exe",                             "BF2042.exe",                            "ue",           1.0f, RGB(80,200,80)},
@@ -1696,9 +1807,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     printf("[*] Process: %s  Module: %s  Engine: %s\n",
            processName.c_str(), moduleName.c_str(), O::engine.c_str());
 
-    if (!O::GWorld && !O::EntityList) {
-        printf("[!] No GWorld or EntityList offset configured.\n");
-        printf("    Run dumper_dma.exe to find offsets, then fill in %s\n",
+    if (!O::GWorld && !O::EntityList && !Off("GameManager")) {
+        printf("[!] No GWorld, EntityList, or GameManager offset configured.\n");
+        printf("    Run dma_main.exe --offsets to find offsets, then fill in %s\n",
                configPath.empty() ? "<game>_offsets.ini" : configPath.c_str());
     }
 

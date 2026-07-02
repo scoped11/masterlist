@@ -2977,7 +2977,7 @@ namespace OffsetDump
 			fprintf(ini, "ProcessName=RainbowSix.exe\n");
 			fprintf(ini, "ProcessName_BE=RainbowSix_BE.exe\n");
 			fprintf(ini, "ModuleName=RainbowSix.exe\n");
-			fprintf(ini, "Engine=anvilnext2\n\n");
+			fprintf(ini, "Engine=anvilnext\n\n");
 
 			fprintf(ini, "[Managers]\n");
 			fprintf(ini, "GameManager=0x%llX\n",    scan.gameManagerPtr ? scan.gameManagerPtr - modBase : 0);
@@ -3018,7 +3018,7 @@ namespace OffsetDump
 
 			fprintf(ini, "[CameraChain]\n");
 			fprintf(ini, "EngineLink=0x120\n");
-			fprintf(ini, "Engine=0x1C8\n");
+			fprintf(ini, "CameraEngine=0x1C8\n");
 			fprintf(ini, "CameraObject=0x08\n\n");
 
 			fprintf(ini, "[Camera]\n");
