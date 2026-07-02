@@ -641,10 +641,598 @@ namespace OffsetDump
 	}
 
 	// ============================================================
-	// Native engine dumper (R6, Apex, etc.)
+	// Pattern scanner
+	// ============================================================
+	struct PatternByte {
+		uint8_t value;
+		bool wildcard;
+	};
+
+	inline std::vector<PatternByte> ParsePattern(const char* pattern)
+	{
+		std::vector<PatternByte> result;
+		const char* p = pattern;
+		while (*p)
+		{
+			while (*p == ' ') p++;
+			if (!*p) break;
+			if (*p == '?')
+			{
+				result.push_back({ 0, true });
+				p++;
+				if (*p == '?') p++;
+			}
+			else
+			{
+				char hex[3] = { p[0], p[1], 0 };
+				result.push_back({ (uint8_t)strtol(hex, nullptr, 16), false });
+				p += 2;
+			}
+		}
+		return result;
+	}
+
+	inline DWORD64 ScanPattern(DWORD64 base, DWORD size, const char* pattern, int skip = 0)
+	{
+		auto pat = ParsePattern(pattern);
+		if (pat.empty()) return 0;
+
+		const DWORD chunkSize = 0x100000;
+		DWORD overlap = (DWORD)pat.size();
+		int found = 0;
+
+		for (DWORD offset = 0; offset < size; offset += chunkSize - overlap)
+		{
+			DWORD toRead = min(chunkSize, size - offset);
+			if (toRead < pat.size()) break;
+			std::vector<BYTE> chunk(toRead);
+			read_buffer(base + offset, chunk.data(), toRead);
+
+			for (DWORD i = 0; i + pat.size() <= toRead; i++)
+			{
+				bool match = true;
+				for (size_t j = 0; j < pat.size(); j++)
+				{
+					if (!pat[j].wildcard && chunk[i + j] != pat[j].value)
+					{ match = false; break; }
+				}
+				if (match)
+				{
+					if (found++ == skip)
+						return base + offset + i;
+				}
+			}
+		}
+		return 0;
+	}
+
+	inline DWORD64 ScanPatternMulti(DWORD64 base, DWORD size, const char* pattern)
+	{
+		return ScanPattern(base, size, pattern, 0);
+	}
+
+	inline DWORD64 ResolveRIP(DWORD64 instrAddr, int opcodeLen)
+	{
+		int32_t disp = read<int32_t>(instrAddr + opcodeLen);
+		return instrAddr + opcodeLen + 4 + disp;
+	}
+
+	struct SectionInfo {
+		DWORD64 base;
+		DWORD   size;
+		char    name[9];
+		DWORD   characteristics;
+	};
+
+	inline std::vector<SectionInfo> GetPESections(DWORD64 modBase)
+	{
+		std::vector<SectionInfo> result;
+		IMAGE_DOS_HEADER dos = {};
+		read_buffer(modBase, &dos, sizeof(dos));
+		if (dos.e_magic != IMAGE_DOS_SIGNATURE) return result;
+
+		IMAGE_NT_HEADERS64 nt = {};
+		read_buffer(modBase + dos.e_lfanew, &nt, sizeof(nt));
+		if (nt.Signature != IMAGE_NT_SIGNATURE) return result;
+
+		DWORD64 secBase = modBase + dos.e_lfanew + sizeof(IMAGE_NT_HEADERS64);
+		for (WORD i = 0; i < nt.FileHeader.NumberOfSections; i++)
+		{
+			IMAGE_SECTION_HEADER sec = {};
+			read_buffer(secBase + i * sizeof(IMAGE_SECTION_HEADER), &sec, sizeof(sec));
+			SectionInfo si = {};
+			si.base = modBase + sec.VirtualAddress;
+			si.size = sec.Misc.VirtualSize;
+			si.characteristics = sec.Characteristics;
+			memcpy(si.name, sec.Name, 8);
+			si.name[8] = 0;
+			result.push_back(si);
+		}
+		return result;
+	}
+
+	// ============================================================
+	// AnvilNext 2.0 sig scanner (Rainbow Six Siege)
+	// ============================================================
+	struct R6ScanResult {
+		DWORD64 gameManagerPtr;
+		DWORD64 statusManagerPtr;
+		DWORD64 cameraManagerPtr;
+		DWORD64 profileManagerPtr;
+		DWORD64 networkManagerPtr;
+		DWORD64 roundManagerPtr;
+		DWORD64 glowManagerPtr;
+		bool found;
+	};
+
+	inline R6ScanResult ScanR6Signatures(DWORD64 modBase)
+	{
+		R6ScanResult r = {};
+		auto sections = GetPESections(modBase);
+
+		DWORD64 textBase = 0;
+		DWORD   textSize = 0;
+		for (auto& s : sections)
+		{
+			if (strcmp(s.name, ".text") == 0)
+			{ textBase = s.base; textSize = s.size; break; }
+		}
+		if (!textBase)
+		{
+			for (auto& s : sections)
+			{
+				if (s.characteristics & IMAGE_SCN_MEM_EXECUTE)
+				{ textBase = s.base; textSize = s.size; break; }
+			}
+		}
+		if (!textBase || textSize < 0x1000)
+		{
+			Log("[-] No executable section found in RainbowSix.exe");
+			return r;
+		}
+
+		Log("[*] Scanning .text section: 0x%llX (size: 0x%X / %u MB)",
+			textBase, textSize, textSize / (1024 * 1024));
+
+		// GameManager — MOV RAX, [RIP+disp32] patterns
+		// Known sigs (try multiple, pick first valid one)
+		const char* gmSigs[] = {
+			"48 8B 05 ?? ?? ?? ?? 8B 8E",
+			"48 8B 05 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B 48",
+			"48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B D8 48 85 C0",
+			nullptr
+		};
+
+		for (int i = 0; gmSigs[i]; i++)
+		{
+			DWORD64 addr = ScanPattern(textBase, textSize, gmSigs[i]);
+			if (addr)
+			{
+				DWORD64 resolved = ResolveRIP(addr, 3);
+				DWORD64 val = read<DWORD64>(resolved);
+				if (val > 0x10000 && val < 0x7FFFFFFFFFFF)
+				{
+					r.gameManagerPtr = resolved;
+					Log("[+] GameManager ptr @ 0x%llX (sig #%d, value=0x%llX)", resolved, i, val);
+					r.found = true;
+					break;
+				}
+				Log("[*] GameManager sig #%d matched @ 0x%llX -> 0x%llX but value 0x%llX invalid",
+					i, addr, resolved, val);
+			}
+		}
+
+		// StatusManager
+		const char* smSigs[] = {
+			"48 8B 05 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B 40 28",
+			"48 8B 05 ?? ?? ?? ?? 48 85 C0 0F 84 ?? ?? ?? ?? 48 8B 48 28",
+			nullptr
+		};
+		for (int i = 0; smSigs[i]; i++)
+		{
+			DWORD64 addr = ScanPattern(textBase, textSize, smSigs[i]);
+			if (addr)
+			{
+				DWORD64 resolved = ResolveRIP(addr, 3);
+				DWORD64 val = read<DWORD64>(resolved);
+				if (val > 0x10000 && val < 0x7FFFFFFFFFFF)
+				{
+					r.statusManagerPtr = resolved;
+					Log("[+] StatusManager ptr @ 0x%llX (sig #%d)", resolved, i);
+					r.found = true;
+					break;
+				}
+			}
+		}
+
+		// CameraManager
+		const char* camSigs[] = {
+			"48 8B 05 ?? ?? ?? ?? 48 8B 48 ?? 48 8B 81 ?? ?? 00 00",
+			"48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? E8 ?? ?? ?? ?? 48 8B C8 48 8B 10",
+			nullptr
+		};
+		for (int i = 0; camSigs[i]; i++)
+		{
+			DWORD64 addr = ScanPattern(textBase, textSize, camSigs[i]);
+			if (addr)
+			{
+				DWORD64 resolved = ResolveRIP(addr, 3);
+				DWORD64 val = read<DWORD64>(resolved);
+				if (val > 0x10000 && val < 0x7FFFFFFFFFFF)
+				{
+					r.cameraManagerPtr = resolved;
+					Log("[+] CameraManager ptr @ 0x%llX (sig #%d)", resolved, i);
+					r.found = true;
+					break;
+				}
+			}
+		}
+
+		// ProfileManager
+		const char* pmSigs[] = {
+			"48 8B 05 ?? ?? ?? ?? 33 D2 48 8B 88 ?? ?? 00 00",
+			nullptr
+		};
+		for (int i = 0; pmSigs[i]; i++)
+		{
+			DWORD64 addr = ScanPattern(textBase, textSize, pmSigs[i]);
+			if (addr)
+			{
+				DWORD64 resolved = ResolveRIP(addr, 3);
+				DWORD64 val = read<DWORD64>(resolved);
+				if (val > 0x10000 && val < 0x7FFFFFFFFFFF)
+				{
+					r.profileManagerPtr = resolved;
+					Log("[+] ProfileManager ptr @ 0x%llX (sig #%d)", resolved, i);
+					r.found = true;
+					break;
+				}
+			}
+		}
+
+		// NetworkManager
+		const char* nmSigs[] = {
+			"48 89 05 ?? ?? ?? ?? 48 8B 4C 24 ?? 48 33 CC E8",
+			nullptr
+		};
+		for (int i = 0; nmSigs[i]; i++)
+		{
+			DWORD64 addr = ScanPattern(textBase, textSize, nmSigs[i]);
+			if (addr)
+			{
+				DWORD64 resolved = ResolveRIP(addr, 3);
+				r.networkManagerPtr = resolved;
+				Log("[+] NetworkManager ptr @ 0x%llX (sig #%d)", resolved, i);
+				r.found = true;
+				break;
+			}
+		}
+
+		// GlowManager
+		const char* glowSigs[] = {
+			"48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8B 0D ?? ?? ?? ?? 48 8B 01",
+			nullptr
+		};
+		for (int i = 0; glowSigs[i]; i++)
+		{
+			DWORD64 addr = ScanPattern(textBase, textSize, glowSigs[i]);
+			if (addr)
+			{
+				DWORD64 resolved = ResolveRIP(addr, 3);
+				DWORD64 val = read<DWORD64>(resolved);
+				if (val > 0x10000 && val < 0x7FFFFFFFFFFF)
+				{
+					r.glowManagerPtr = resolved;
+					Log("[+] GlowManager ptr @ 0x%llX (sig #%d)", resolved, i);
+					r.found = true;
+					break;
+				}
+			}
+		}
+
+		return r;
+	}
+
+	inline bool DumpAnvilNextOffsets(const GameDef& game, const std::string& outDir)
+	{
+		DWORD64 modBase = DMA::GetModuleBase(game.coreModule);
+		if (!modBase) { Log("[-] %s not found", game.coreModule); return false; }
+		Log("[+] %s -> 0x%llX", game.coreModule, modBase);
+
+		R6ScanResult scan = ScanR6Signatures(modBase);
+
+		std::string filePath = outDir + "\\offsets.h";
+		FILE* f = nullptr;
+		fopen_s(&f, filePath.c_str(), "w");
+		if (!f) { Log("[-] Failed to create %s", filePath.c_str()); return false; }
+
+		time_t now = time(nullptr);
+		struct tm t = {};
+		localtime_s(&t, &now);
+		char date[32];
+		sprintf_s(date, "%04d-%02d-%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+
+		fprintf(f, "// %s Offset Dump - %s\n", game.name, date);
+		fprintf(f, "// Engine: AnvilNext 2.0 (Ubisoft)\n");
+		fprintf(f, "// Auto-generated via DMA pattern scanning\n");
+		fprintf(f, "// %s base: 0x%llX\n", game.coreModule, modBase);
+		fprintf(f, "// NOTE: Static pointers change every game update.\n");
+		fprintf(f, "//       Re-run dumper after patches.\n\n");
+		fprintf(f, "#pragma once\n#include <cstdint>\n\n");
+
+		DumpAllModuleList(f);
+
+		// Scan results
+		fprintf(f, "// ============================================\n");
+		fprintf(f, "// Pattern Scan Results (Static Pointers)\n");
+		fprintf(f, "// These are ABSOLUTE addresses in the process.\n");
+		fprintf(f, "// Subtract module base for RVA.\n");
+		fprintf(f, "// ============================================\n\n");
+
+		fprintf(f, "namespace R6_Statics {\n");
+		fprintf(f, "    constexpr uintptr_t ModuleBase = 0x%llX;\n\n", modBase);
+
+		auto dumpPtr = [&](const char* name, DWORD64 ptr) {
+			if (ptr)
+			{
+				DWORD64 val = read<DWORD64>(ptr);
+				fprintf(f, "    constexpr uintptr_t %s = 0x%llX;  // RVA=0x%llX  value=0x%llX\n",
+					name, ptr, ptr - modBase, val);
+			}
+			else
+			{
+				fprintf(f, "    constexpr uintptr_t %s = 0x0;  // NOT FOUND\n", name);
+			}
+		};
+
+		dumpPtr("GameManager",    scan.gameManagerPtr);
+		dumpPtr("StatusManager",  scan.statusManagerPtr);
+		dumpPtr("CameraManager",  scan.cameraManagerPtr);
+		dumpPtr("ProfileManager", scan.profileManagerPtr);
+		dumpPtr("NetworkManager", scan.networkManagerPtr);
+		dumpPtr("GlowManager",    scan.glowManagerPtr);
+		fprintf(f, "}\n\n");
+
+		// Known AnvilNext 2.0 structure offsets (from public RE sources)
+		fprintf(f, "// ============================================\n");
+		fprintf(f, "// AnvilNext 2.0 Structure Offsets\n");
+		fprintf(f, "// These are RELATIVE offsets within structures.\n");
+		fprintf(f, "// More stable across patches than static ptrs.\n");
+		fprintf(f, "// ============================================\n\n");
+
+		fprintf(f, "namespace R6_GameManager {\n");
+		fprintf(f, "    constexpr uintptr_t EntityList  = 0x1C8;\n");
+		fprintf(f, "    constexpr uintptr_t EntityCount = 0x1D0;\n");
+		fprintf(f, "}\n\n");
+
+		fprintf(f, "namespace R6_Entity {\n");
+		fprintf(f, "    constexpr uintptr_t Pawn              = 0x20;\n");
+		fprintf(f, "    constexpr uintptr_t Replication       = 0xC8;\n");
+		fprintf(f, "    constexpr uintptr_t ComponentChain    = 0xD8;\n");
+		fprintf(f, "    constexpr uintptr_t HeadPosition      = 0x6A0;  // Vec3\n");
+		fprintf(f, "    constexpr uintptr_t FeetPosition      = 0x700;  // Vec3\n");
+		fprintf(f, "}\n\n");
+
+		fprintf(f, "namespace R6_Replication {\n");
+		fprintf(f, "    constexpr uintptr_t TeamID = 0x190;\n");
+		fprintf(f, "}\n\n");
+
+		fprintf(f, "namespace R6_Component {\n");
+		fprintf(f, "    constexpr uintptr_t ChildComponent = 0x8;\n");
+		fprintf(f, "    constexpr uintptr_t Health         = 0x168;  // int32\n");
+		fprintf(f, "}\n\n");
+
+		fprintf(f, "namespace R6_StatusManager {\n");
+		fprintf(f, "    constexpr uintptr_t LocalEntity = 0x28;\n");
+		fprintf(f, "}\n\n");
+
+		fprintf(f, "namespace R6_CameraManager {\n");
+		fprintf(f, "    constexpr uintptr_t EngineLink = 0x120;\n");
+		fprintf(f, "}\n\n");
+
+		fprintf(f, "namespace R6_CameraEngine {\n");
+		fprintf(f, "    constexpr uintptr_t CameraPtr = 0x1C8;\n");
+		fprintf(f, "}\n\n");
+
+		fprintf(f, "namespace R6_Camera {\n");
+		fprintf(f, "    constexpr uintptr_t Object          = 0x08;\n");
+		fprintf(f, "    constexpr uintptr_t ViewRight       = 0xD0;   // Vec3\n");
+		fprintf(f, "    constexpr uintptr_t ViewUp          = 0xE0;   // Vec3\n");
+		fprintf(f, "    constexpr uintptr_t ViewForward     = 0xF0;   // Vec3\n");
+		fprintf(f, "    constexpr uintptr_t ViewTranslation = 0x100;  // Vec3\n");
+		fprintf(f, "    constexpr uintptr_t FovX            = 0x110;  // float\n");
+		fprintf(f, "    constexpr uintptr_t FovY            = 0x124;  // float\n");
+		fprintf(f, "}\n\n");
+
+		// Pointer chain documentation
+		fprintf(f, "// ============================================\n");
+		fprintf(f, "// Pointer Chain Reference\n");
+		fprintf(f, "// ============================================\n");
+		fprintf(f, "//\n");
+		fprintf(f, "// Entity chain:\n");
+		fprintf(f, "//   [GameManager] -> +0x1C8 = EntityList\n");
+		fprintf(f, "//   EntityList[i * 0x8] = Entity\n");
+		fprintf(f, "//   Entity + 0x20 = Pawn\n");
+		fprintf(f, "//   Entity + 0x6A0 = Head (Vec3)\n");
+		fprintf(f, "//   Entity + 0x700 = Feet (Vec3)\n");
+		fprintf(f, "//\n");
+		fprintf(f, "// Health chain:\n");
+		fprintf(f, "//   Entity + 0xD8 -> + 0x8 -> + 0x168 = Health\n");
+		fprintf(f, "//\n");
+		fprintf(f, "// Team chain:\n");
+		fprintf(f, "//   Entity + 0xC8 -> + 0x190 = TeamID\n");
+		fprintf(f, "//\n");
+		fprintf(f, "// Camera chain:\n");
+		fprintf(f, "//   [CameraManager] + 0x120 -> + 0x1C8 -> + 0x08 = Camera\n");
+		fprintf(f, "//   Camera + 0xD0 = ViewRight\n");
+		fprintf(f, "//   Camera + 0xE0 = ViewUp\n");
+		fprintf(f, "//   Camera + 0xF0 = ViewForward\n");
+		fprintf(f, "//   Camera + 0x100 = ViewTranslation\n");
+		fprintf(f, "//   Camera + 0x110 = FovX, + 0x124 = FovY\n");
+		fprintf(f, "//\n");
+		fprintf(f, "// Local player:\n");
+		fprintf(f, "//   [StatusManager] + 0x28 = LocalEntity\n");
+		fprintf(f, "//\n");
+		fprintf(f, "// NOTE: GameManager pointer may be encrypted (XOR + ROL).\n");
+		fprintf(f, "//       Decryption keys change per patch.\n\n");
+
+		// Validate by trying to walk the GameManager chain
+		if (scan.gameManagerPtr)
+		{
+			fprintf(f, "// ============================================\n");
+			fprintf(f, "// Live Validation\n");
+			fprintf(f, "// ============================================\n\n");
+
+			DWORD64 gmVal = read<DWORD64>(scan.gameManagerPtr);
+			fprintf(f, "// GameManager raw value: 0x%llX\n", gmVal);
+
+			if (gmVal > 0x10000 && gmVal < 0x7FFFFFFFFFFF)
+			{
+				DWORD64 entityList = read<DWORD64>(gmVal + 0x1C8);
+				DWORD32 entityCount = read<DWORD32>(gmVal + 0x1D0);
+				fprintf(f, "// EntityList ptr: 0x%llX\n", entityList);
+				fprintf(f, "// EntityCount: %u\n", entityCount);
+
+				if (entityList > 0x10000 && entityCount > 0 && entityCount < 100)
+				{
+					fprintf(f, "// Chain validation: PASSED (found %u entities)\n\n", entityCount);
+					Log("[+] Chain validation PASSED: %u entities found", entityCount);
+
+					for (DWORD32 i = 0; i < min(entityCount, (DWORD32)20); i++)
+					{
+						DWORD64 entity = read<DWORD64>(entityList + i * 0x8);
+						if (!entity) continue;
+
+						float headX = read<float>(entity + 0x6A0);
+						float headY = read<float>(entity + 0x6A4);
+						float headZ = read<float>(entity + 0x6A8);
+
+						DWORD64 repl = read<DWORD64>(entity + 0xC8);
+						int teamId = repl ? read<int>(repl + 0x190) : -1;
+
+						DWORD64 comp = read<DWORD64>(entity + 0xD8);
+						DWORD64 child = comp ? read<DWORD64>(comp + 0x8) : 0;
+						int health = child ? read<int>(child + 0x168) : -1;
+
+						fprintf(f, "// Entity[%u] @ 0x%llX  pos=(%.1f, %.1f, %.1f)  team=%d  hp=%d\n",
+							i, entity, headX, headY, headZ, teamId, health);
+					}
+					fprintf(f, "\n");
+				}
+				else
+				{
+					fprintf(f, "// Chain validation: pointer may be encrypted\n");
+					fprintf(f, "// Try ROL/ROR decryption on the GameManager value\n\n");
+					Log("[!] EntityList chain invalid — GameManager pointer likely encrypted");
+
+					// Try common rotations to decrypt
+					fprintf(f, "// Decryption attempts (ROL with common rotations):\n");
+					for (int rot = 1; rot <= 63; rot++)
+					{
+						DWORD64 decrypted = _rotl64(gmVal, rot);
+						DWORD64 testList = 0;
+						if (decrypted > 0x10000 && decrypted < 0x7FFFFFFFFFFF)
+						{
+							testList = read<DWORD64>(decrypted + 0x1C8);
+							DWORD32 testCount = read<DWORD32>(decrypted + 0x1D0);
+							if (testList > 0x10000 && testCount > 0 && testCount < 100)
+							{
+								fprintf(f, "// ROL(%d) -> 0x%llX -> EntityList=0x%llX, Count=%u  *** MATCH ***\n",
+									rot, decrypted, testList, testCount);
+								Log("[+] Decryption found: ROL(%d) -> 0x%llX, %u entities", rot, decrypted, testCount);
+							}
+						}
+					}
+					fprintf(f, "\n");
+				}
+			}
+			else
+			{
+				fprintf(f, "// GameManager value looks like a raw encrypted value\n");
+				fprintf(f, "// XOR key + ROL rotation needed to decrypt\n\n");
+				Log("[!] GameManager raw value 0x%llX — needs decryption", gmVal);
+			}
+		}
+
+		fclose(f);
+
+		// Also generate an INI with the resolved offsets
+		std::string iniPath = outDir + "\\r6_offsets.ini";
+		FILE* ini = nullptr;
+		fopen_s(&ini, iniPath.c_str(), "w");
+		if (ini)
+		{
+			fprintf(ini, "# Rainbow Six Siege — Auto-generated Offsets\n");
+			fprintf(ini, "# Date: %s\n", date);
+			fprintf(ini, "# Engine: AnvilNext 2.0\n");
+			fprintf(ini, "# Module: %s @ 0x%llX\n\n", game.coreModule, modBase);
+
+			fprintf(ini, "[Identity]\n");
+			fprintf(ini, "GameName=Rainbow Six Siege\n");
+			fprintf(ini, "ProcessName=RainbowSix.exe\n");
+			fprintf(ini, "ProcessName_BE=RainbowSix_BE.exe\n");
+			fprintf(ini, "ModuleName=RainbowSix.exe\n");
+			fprintf(ini, "Engine=anvilnext2\n\n");
+
+			fprintf(ini, "[Managers]\n");
+			fprintf(ini, "GameManager=0x%llX\n",    scan.gameManagerPtr ? scan.gameManagerPtr - modBase : 0);
+			fprintf(ini, "StatusManager=0x%llX\n",  scan.statusManagerPtr ? scan.statusManagerPtr - modBase : 0);
+			fprintf(ini, "CameraManager=0x%llX\n",  scan.cameraManagerPtr ? scan.cameraManagerPtr - modBase : 0);
+			fprintf(ini, "ProfileManager=0x%llX\n", scan.profileManagerPtr ? scan.profileManagerPtr - modBase : 0);
+			fprintf(ini, "NetworkManager=0x%llX\n", scan.networkManagerPtr ? scan.networkManagerPtr - modBase : 0);
+			fprintf(ini, "GlowManager=0x%llX\n\n",  scan.glowManagerPtr ? scan.glowManagerPtr - modBase : 0);
+
+			fprintf(ini, "[GameManager]\n");
+			fprintf(ini, "EntityList=0x1C8\n");
+			fprintf(ini, "EntityCount=0x1D0\n\n");
+
+			fprintf(ini, "[Entity]\n");
+			fprintf(ini, "Pawn=0x20\n");
+			fprintf(ini, "Replication=0xC8\n");
+			fprintf(ini, "ComponentChain=0xD8\n");
+			fprintf(ini, "HeadPosition=0x6A0\n");
+			fprintf(ini, "FeetPosition=0x700\n\n");
+
+			fprintf(ini, "[Replication]\n");
+			fprintf(ini, "TeamID=0x190\n\n");
+
+			fprintf(ini, "[Component]\n");
+			fprintf(ini, "ChildComponent=0x8\n");
+			fprintf(ini, "Health=0x168\n\n");
+
+			fprintf(ini, "[StatusManager]\n");
+			fprintf(ini, "LocalEntity=0x28\n\n");
+
+			fprintf(ini, "[CameraChain]\n");
+			fprintf(ini, "EngineLink=0x120\n");
+			fprintf(ini, "Engine=0x1C8\n");
+			fprintf(ini, "CameraObject=0x08\n\n");
+
+			fprintf(ini, "[Camera]\n");
+			fprintf(ini, "ViewRight=0xD0\n");
+			fprintf(ini, "ViewUp=0xE0\n");
+			fprintf(ini, "ViewForward=0xF0\n");
+			fprintf(ini, "ViewTranslation=0x100\n");
+			fprintf(ini, "FovX=0x110\n");
+			fprintf(ini, "FovY=0x124\n");
+
+			fclose(ini);
+			Log("[+] R6 INI offsets written to %s", iniPath.c_str());
+		}
+
+		Log("[+] AnvilNext offsets dumped to %s", filePath.c_str());
+		return true;
+	}
+
+	// ============================================================
+	// Native engine dumper (Apex, generic, etc.)
 	// ============================================================
 	inline bool DumpNativeOffsets(const GameDef& game, const std::string& outDir)
 	{
+		// R6 Siege gets the dedicated AnvilNext scanner
+		if (_stricmp(game.name, "RainbowSix") == 0)
+			return DumpAnvilNextOffsets(game, outDir);
+
 		std::string filePath = outDir + "\\offsets.h";
 		FILE* f = nullptr;
 		fopen_s(&f, filePath.c_str(), "w");
@@ -658,42 +1246,28 @@ namespace OffsetDump
 
 		fprintf(f, "// %s Offset Dump - %s\n", game.name, date);
 		fprintf(f, "// Engine: Native\n");
-		fprintf(f, "// Auto-generated via DMA PE analysis\n\n");
+		fprintf(f, "// Auto-generated via DMA PE analysis + pattern scan\n\n");
 		fprintf(f, "#pragma once\n#include <cstdint>\n\n");
 
 		DumpAllModuleList(f);
 
-		// Dump exports from key modules
 		auto modules = Dumper::EnumerateModules();
-
-		// Always dump the main exe
 		DumpModuleExports(f, game.coreModule);
 
-		// Dump exports from interesting DLLs
 		const char* interestingModules[] = {
-			// R6
-			"gamedll_ph_be.dll", "uplay_r2.dll",
-			// Apex
 			"client.dll", "engine.dll", "materialsystem.dll", "vstdlib.dll",
 			"tier0.dll", "inputsystem.dll", "datacache.dll",
-			// Common
-			"d3d11.dll", "dxgi.dll",
+			"gamedll_ph_be.dll", "uplay_r2.dll",
 			nullptr
 		};
 
 		for (int i = 0; interestingModules[i]; i++)
 		{
-			bool found = false;
 			for (auto& mod : modules)
 			{
 				if (_stricmp(mod.name.c_str(), interestingModules[i]) == 0)
-				{
-					found = true;
-					break;
-				}
+				{ DumpModuleExports(f, interestingModules[i]); break; }
 			}
-			if (found)
-				DumpModuleExports(f, interestingModules[i]);
 		}
 
 		fclose(f);
