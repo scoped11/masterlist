@@ -9,6 +9,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <set>
 
 namespace OffsetDump
 {
@@ -2371,6 +2372,9 @@ namespace OffsetDump
 		DWORD64 networkManagerPtr;
 		DWORD64 roundManagerPtr;
 		DWORD64 glowManagerPtr;
+		DWORD64 gameRendererPtr;
+		DWORD64 decryptedGameManager; // actual heap address after decryption
+		int gmRotation; // ROL rotation used, 0 = plaintext
 		bool found;
 	};
 
@@ -2520,6 +2524,8 @@ namespace OffsetDump
 		// GlowManager
 		const char* glowSigs[] = {
 			"48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8B 0D ?? ?? ?? ?? 48 8B 01",
+			"48 8B 0D ?? ?? ?? ?? 48 8B D7 E8 ?? ?? ?? ?? 48 85 C0",
+			"48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? 48 89 F2 E8 ?? ?? ?? ?? 48 85 C0 74",
 			nullptr
 		};
 		for (int i = 0; glowSigs[i]; i++)
@@ -2537,6 +2543,208 @@ namespace OffsetDump
 					break;
 				}
 			}
+		}
+
+		// GameRenderer (camera chains off this)
+		const char* grSigs[] = {
+			"4C 89 0D ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 45 33 C9 BA",
+			"48 8B 05 ?? ?? ?? ?? 48 85 C0 74 ?? F3 0F 10 80",
+			nullptr
+		};
+		for (int i = 0; grSigs[i]; i++)
+		{
+			DWORD64 addr = ScanPattern(textBase, textSize, grSigs[i]);
+			if (addr)
+			{
+				DWORD64 resolved = ResolveRIP(addr, 3);
+				DWORD64 val = read<DWORD64>(resolved);
+				if (val > 0x10000 && val < 0x7FFFFFFFFFFF)
+				{
+					r.gameRendererPtr = resolved;
+					Log("[+] GameRenderer ptr @ 0x%llX (sig #%d, value=0x%llX)", resolved, i, val);
+					r.found = true;
+					break;
+				}
+			}
+		}
+
+		// ============================================================
+		// Validate GameManager chain (detect encryption)
+		// ============================================================
+		bool gmChainValid = false;
+		DWORD64 gmEncryptedAddr = 0;
+		if (r.gameManagerPtr)
+		{
+			DWORD64 gmVal = read<DWORD64>(r.gameManagerPtr);
+			if (gmVal > 0x10000 && gmVal < 0x7FFFFFFFFFFF)
+			{
+				DWORD64 el = read<DWORD64>(gmVal + 0x1C8);
+				int32_t ec = read<int32_t>(gmVal + 0x1D0);
+				if (el > 0x10000 && el < 0x7FF000000000 && ec > 0 && ec < 100)
+				{
+					DWORD64 ent0 = read<DWORD64>(el);
+					if (ent0 > 0x10000 && ent0 < 0x7FF000000000)
+					{
+						gmChainValid = true;
+						r.decryptedGameManager = gmVal;
+						r.gmRotation = 0;
+						Log("[+] GameManager chain VALID (plaintext): %d entities", ec);
+					}
+				}
+
+				if (!gmChainValid)
+				{
+					Log("[*] GameManager at 0x%llX has encrypted value 0x%llX — trying ROL decryption...",
+						r.gameManagerPtr, gmVal);
+					gmEncryptedAddr = r.gameManagerPtr;
+
+					for (int rot = 1; rot <= 63; rot++)
+					{
+						DWORD64 dec = _rotl64(gmVal, rot);
+						if (dec < 0x10000 || dec > 0x7FF000000000) continue;
+						DWORD64 el2 = read<DWORD64>(dec + 0x1C8);
+						int32_t ec2 = read<int32_t>(dec + 0x1D0);
+						if (el2 < 0x10000 || el2 > 0x7FF000000000) continue;
+						if (ec2 <= 0 || ec2 > 100) continue;
+						DWORD64 ent = read<DWORD64>(el2);
+						if (ent < 0x10000 || ent > 0x7FF000000000) continue;
+						gmChainValid = true;
+						r.decryptedGameManager = dec;
+						r.gmRotation = rot;
+						Log("[+] GameManager decrypted with ROL(%d): 0x%llX -> 0x%llX", rot, gmVal, dec);
+						Log("[+]   EntityList=0x%llX, Count=%d", el2, ec2);
+						break;
+					}
+
+					// Try ROTR too
+					if (!gmChainValid)
+					{
+						for (int rot = 1; rot <= 63; rot++)
+						{
+							DWORD64 dec = _rotr64(gmVal, rot);
+							if (dec < 0x10000 || dec > 0x7FF000000000) continue;
+							DWORD64 el2 = read<DWORD64>(dec + 0x1C8);
+							int32_t ec2 = read<int32_t>(dec + 0x1D0);
+							if (el2 < 0x10000 || el2 > 0x7FF000000000) continue;
+							if (ec2 <= 0 || ec2 > 100) continue;
+							DWORD64 ent = read<DWORD64>(el2);
+							if (ent < 0x10000 || ent > 0x7FF000000000) continue;
+							gmChainValid = true;
+							r.decryptedGameManager = dec;
+							r.gmRotation = -rot; // negative = ROR
+							Log("[+] GameManager decrypted with ROR(%d): 0x%llX -> 0x%llX", rot, gmVal, dec);
+							Log("[+]   EntityList=0x%llX, Count=%d", el2, ec2);
+							break;
+						}
+					}
+
+					if (!gmChainValid)
+						Log("[!] ROL/ROR alone didn't work — pointer uses XOR+ROL encryption");
+				}
+			}
+		}
+
+		// ============================================================
+		// Brute-force: if no valid GameManager chain, scan ALL RIP-relative
+		// MOV instructions and validate entity chain (try plaintext + ROL)
+		// ============================================================
+		if (!gmChainValid)
+		{
+			Log("[*] Running brute-force GameManager scan (plaintext + ROL 1-63)...");
+
+			const DWORD chunkSize = 0x400000; // 4MB chunks
+			std::set<DWORD64> testedPtrs;
+
+			for (DWORD offset = 0; offset < textSize - 7 && !gmChainValid; offset += chunkSize)
+			{
+				DWORD toRead = min(chunkSize + 16, textSize - offset);
+				std::vector<BYTE> chunk(toRead);
+				read_buffer(textBase + offset, chunk.data(), toRead);
+
+				for (DWORD i = 0; i + 7 <= toRead && !gmChainValid; i++)
+				{
+					if (chunk[i] != 0x48) continue;
+					if (chunk[i + 1] != 0x8B) continue;
+					BYTE modrm = chunk[i + 2];
+					if ((modrm & 0xC7) != 0x05) continue;
+
+					int32_t disp = *(int32_t*)(&chunk[i + 3]);
+					DWORD64 instrAddr = textBase + offset + i;
+					DWORD64 targetAddr = instrAddr + 7 + disp;
+
+					if (targetAddr >= textBase && targetAddr < textBase + textSize) continue;
+					if (testedPtrs.count(targetAddr)) continue;
+					testedPtrs.insert(targetAddr);
+
+					DWORD64 val = read<DWORD64>(targetAddr);
+					if (val < 0x10000 || val > 0x7FFFFFFFFFFF) continue;
+
+					// Validate entity chain with strict checks to avoid false positives
+					auto tryChain = [&](DWORD64 candidate) -> bool {
+						DWORD64 el = read<DWORD64>(candidate + 0x1C8);
+						int32_t ec = read<int32_t>(candidate + 0x1D0);
+						// EntityList must be a heap pointer (not in module range)
+						if (el < 0x10000 || el > 0x7FF000000000) return false;
+						if (ec <= 0 || ec > 30) return false;
+						// Check multiple entities, require at least 2 non-null
+						int validEnts = 0;
+						bool anyNonZeroPos = false;
+						for (int e = 0; e < min(ec, 10); e++)
+						{
+							DWORD64 ent = read<DWORD64>(el + e * 0x8);
+							if (ent < 0x10000 || ent > 0x7FF000000000) continue;
+							validEnts++;
+							float hx = read<float>(ent + 0x6A0);
+							float hy = read<float>(ent + 0x6A4);
+							float hz = read<float>(ent + 0x6A8);
+							if (hx != hx || hy != hy || hz != hz) continue; // NaN
+							if (hx < -100000 || hx > 100000) continue;
+							if (hx != 0.0f || hy != 0.0f || hz != 0.0f)
+								anyNonZeroPos = true;
+						}
+						if (validEnts < 1) return false;
+						// In-menu might have zero positions; accept if we got valid entity pointers
+						return true;
+					};
+
+					if (tryChain(val))
+					{
+						r.gameManagerPtr = targetAddr;
+						r.decryptedGameManager = val;
+						r.gmRotation = 0;
+						gmChainValid = true;
+						r.found = true;
+						Log("[+] BRUTE-FORCE: GameManager @ 0x%llX (RVA=0x%llX), value=0x%llX",
+							targetAddr, targetAddr - modBase, val);
+						break;
+					}
+
+					// Try ROL 1-63
+					for (int rot = 1; rot <= 63 && !gmChainValid; rot++)
+					{
+						DWORD64 dec = _rotl64(val, rot);
+						if (dec < 0x10000 || dec > 0x7FFFFFFFFFFF) continue;
+						if (tryChain(dec))
+						{
+							r.gameManagerPtr = targetAddr;
+							r.decryptedGameManager = dec;
+							r.gmRotation = rot;
+							gmChainValid = true;
+							r.found = true;
+							Log("[+] BRUTE-FORCE+ROL(%d): GameManager @ 0x%llX, raw=0x%llX -> dec=0x%llX",
+								rot, targetAddr, val, dec);
+							break;
+						}
+					}
+				}
+
+				if ((offset % 0x2000000) == 0 && offset > 0)
+					Log("[*]   scanned %u / %u MB...", offset / (1024*1024), textSize / (1024*1024));
+			}
+
+			if (!gmChainValid)
+				Log("[!] Brute-force: tested %llu unique addrs, no valid GameManager chain",
+					(DWORD64)testedPtrs.size());
 		}
 
 		return r;
@@ -2600,6 +2808,13 @@ namespace OffsetDump
 		dumpPtr("ProfileManager", scan.profileManagerPtr);
 		dumpPtr("NetworkManager", scan.networkManagerPtr);
 		dumpPtr("GlowManager",    scan.glowManagerPtr);
+		dumpPtr("GameRenderer",   scan.gameRendererPtr);
+
+		if (scan.decryptedGameManager)
+		{
+			fprintf(f, "\n    // Decrypted GameManager: 0x%llX (ROL %d)\n",
+				scan.decryptedGameManager, scan.gmRotation);
+		}
 		fprintf(f, "}\n\n");
 
 		// Known AnvilNext 2.0 structure offsets (from public RE sources)
@@ -2692,8 +2907,12 @@ namespace OffsetDump
 			fprintf(f, "// Live Validation\n");
 			fprintf(f, "// ============================================\n\n");
 
-			DWORD64 gmVal = read<DWORD64>(scan.gameManagerPtr);
-			fprintf(f, "// GameManager raw value: 0x%llX\n", gmVal);
+			DWORD64 gmRaw = read<DWORD64>(scan.gameManagerPtr);
+			fprintf(f, "// GameManager raw value: 0x%llX\n", gmRaw);
+
+			DWORD64 gmVal = scan.decryptedGameManager ? scan.decryptedGameManager : gmRaw;
+			if (scan.decryptedGameManager && scan.gmRotation != 0)
+				fprintf(f, "// Decrypted (ROL %d): 0x%llX\n", scan.gmRotation, gmVal);
 
 			if (gmVal > 0x10000 && gmVal < 0x7FFFFFFFFFFF)
 			{
@@ -2730,36 +2949,13 @@ namespace OffsetDump
 				}
 				else
 				{
-					fprintf(f, "// Chain validation: pointer may be encrypted\n");
-					fprintf(f, "// Try ROL/ROR decryption on the GameManager value\n\n");
-					Log("[!] EntityList chain invalid — GameManager pointer likely encrypted");
-
-					// Try common rotations to decrypt
-					fprintf(f, "// Decryption attempts (ROL with common rotations):\n");
-					for (int rot = 1; rot <= 63; rot++)
-					{
-						DWORD64 decrypted = _rotl64(gmVal, rot);
-						DWORD64 testList = 0;
-						if (decrypted > 0x10000 && decrypted < 0x7FFFFFFFFFFF)
-						{
-							testList = read<DWORD64>(decrypted + 0x1C8);
-							DWORD32 testCount = read<DWORD32>(decrypted + 0x1D0);
-							if (testList > 0x10000 && testCount > 0 && testCount < 100)
-							{
-								fprintf(f, "// ROL(%d) -> 0x%llX -> EntityList=0x%llX, Count=%u  *** MATCH ***\n",
-									rot, decrypted, testList, testCount);
-								Log("[+] Decryption found: ROL(%d) -> 0x%llX, %u entities", rot, decrypted, testCount);
-							}
-						}
-					}
-					fprintf(f, "\n");
+					fprintf(f, "// Chain validation: FAILED — pointer encrypted or stale\n\n");
+					Log("[!] EntityList chain invalid at decrypted GM 0x%llX", gmVal);
 				}
 			}
 			else
 			{
-				fprintf(f, "// GameManager value looks like a raw encrypted value\n");
-				fprintf(f, "// XOR key + ROL rotation needed to decrypt\n\n");
-				Log("[!] GameManager raw value 0x%llX — needs decryption", gmVal);
+				fprintf(f, "// GameManager value outside valid range\n\n");
 			}
 		}
 
@@ -2789,7 +2985,15 @@ namespace OffsetDump
 			fprintf(ini, "CameraManager=0x%llX\n",  scan.cameraManagerPtr ? scan.cameraManagerPtr - modBase : 0);
 			fprintf(ini, "ProfileManager=0x%llX\n", scan.profileManagerPtr ? scan.profileManagerPtr - modBase : 0);
 			fprintf(ini, "NetworkManager=0x%llX\n", scan.networkManagerPtr ? scan.networkManagerPtr - modBase : 0);
-			fprintf(ini, "GlowManager=0x%llX\n\n",  scan.glowManagerPtr ? scan.glowManagerPtr - modBase : 0);
+			fprintf(ini, "GlowManager=0x%llX\n",    scan.glowManagerPtr ? scan.glowManagerPtr - modBase : 0);
+			fprintf(ini, "GameRenderer=0x%llX\n\n",  scan.gameRendererPtr ? scan.gameRendererPtr - modBase : 0);
+
+			if (scan.decryptedGameManager)
+			{
+				fprintf(ini, "[Decryption]\n");
+				fprintf(ini, "GameManagerDecrypted=0x%llX\n", scan.decryptedGameManager);
+				fprintf(ini, "GameManagerRotation=%d\n\n", scan.gmRotation);
+			}
 
 			fprintf(ini, "[GameManager]\n");
 			fprintf(ini, "EntityList=0x1C8\n");
