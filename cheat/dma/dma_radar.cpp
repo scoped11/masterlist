@@ -1,13 +1,15 @@
 // Universal DMA Radar — ESP radar via FPGA DMA card
 // Works with any game by loading a per-game offset config.
 // Runs on PC2 (radar), reads PC1 (target) memory over hardware DMA.
+// Built-in web radar: share http://<your-ip>:8888 with teammates.
 //
 // Requirements: vmm.dll + leechcore.dll in same directory (from MemProcFS)
-// Build: cl /O2 /EHsc /D_CRT_SECURE_NO_WARNINGS dma_radar.cpp gdi32.lib user32.lib winmm.lib /link /SUBSYSTEM:WINDOWS
+// Build: cl /O2 /EHsc /D_CRT_SECURE_NO_WARNINGS dma_radar.cpp gdi32.lib user32.lib winmm.lib ws2_32.lib /link /SUBSYSTEM:WINDOWS
 //
 // Usage: dma_radar.exe <game_config.ini>
 //        dma_radar.exe --game r6
 //        dma_radar.exe --game apex
+//        dma_radar.exe --game cs2 --port 9000
 //
 // Supported game aliases:
 //   r6, rust, apex, bf2042, tarkov, pubg, cs2, hunt, valorant,
@@ -15,6 +17,8 @@
 
 #undef UNICODE
 #undef _UNICODE
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <cstdio>
 #include <cstdint>
@@ -28,10 +32,12 @@
 #include <thread>
 #include <atomic>
 #include <algorithm>
+#include <sstream>
 
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "winmm.lib")
+#pragma comment(lib, "ws2_32.lib")
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -747,6 +753,313 @@ namespace Radar {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Web Radar — HTTP server + live canvas radar page
+// Share http://<your-ip>:PORT with teammates (phone, tablet, second monitor)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+namespace WebRadar {
+    static int port = 8888;
+    static std::atomic<bool> running{true};
+
+    static std::string BuildJSON() {
+        std::lock_guard<std::mutex> lock(g_dataMutex);
+        std::ostringstream js;
+        js << "{\"game\":\"" << Radar::gameName << "\","
+           << "\"count\":" << g_playerCount << ","
+           << "\"range\":" << (int)Radar::radarRange << ","
+           << "\"local\":{\"x\":" << g_localPos.x << ",\"y\":" << g_localPos.y
+           << ",\"z\":" << g_localPos.z << ",\"yaw\":" << g_localYaw
+           << ",\"team\":" << g_localTeam << "},"
+           << "\"scale\":" << g_unitScale << ","
+           << "\"players\":[";
+        for (int i = 0; i < g_playerCount; i++) {
+            auto& p = g_players[i];
+            if (!p.valid) continue;
+            if (i > 0) js << ",";
+            js << "{\"x\":" << p.origin.x << ",\"y\":" << p.origin.y
+               << ",\"z\":" << p.origin.z << ",\"hp\":" << p.health
+               << ",\"mhp\":" << p.maxHealth << ",\"t\":" << p.team
+               << ",\"d\":" << (int)p.distance;
+            if (p.name[0]) {
+                js << ",\"n\":\"";
+                for (const char* c = p.name; *c; c++) {
+                    if (*c == '"') js << "\\\"";
+                    else if (*c == '\\') js << "\\\\";
+                    else js << *c;
+                }
+                js << "\"";
+            }
+            js << "}";
+        }
+        js << "]}";
+        return js.str();
+    }
+
+    static const char* HTML_PAGE = R"HTML(<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>DMA Radar</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0c0c12;color:#b4b4b4;font-family:'Consolas','Courier New',monospace;overflow:hidden;touch-action:none}
+#wrap{display:flex;height:100vh;width:100vw}
+#radar-box{flex:1;display:flex;align-items:center;justify-content:center;min-width:0}
+canvas{display:block;border-radius:50%;image-rendering:auto}
+#panel{width:280px;padding:16px;overflow-y:auto;background:#10101a;border-left:1px solid #222}
+#title{font-size:18px;font-weight:bold;margin-bottom:8px}
+#status{font-size:13px;color:#888;margin-bottom:12px}
+.sep{height:1px;background:#333;margin:8px 0}
+.enemy{font-size:12px;color:#ff7878;margin-bottom:2px}
+.hpbar{height:4px;background:#282828;margin-bottom:8px;border-radius:2px}
+.hpbar div{height:100%;border-radius:2px}
+#controls{margin-top:16px}
+#controls button{background:#1a1a2a;color:#aaa;border:1px solid #333;padding:6px 14px;margin:2px;cursor:pointer;font-family:inherit;font-size:12px;border-radius:3px}
+#controls button:hover{background:#252540;color:#fff}
+#web-info{font-size:11px;color:#555;margin-top:16px;line-height:1.5}
+#conn{font-size:11px;color:#444;margin-top:4px}
+@media(max-width:700px){
+  #wrap{flex-direction:column}
+  #panel{width:100%;height:40vh;border-left:none;border-top:1px solid #222}
+  #radar-box{height:60vh}
+}
+</style>
+</head><body>
+<div id="wrap">
+<div id="radar-box"><canvas id="c"></canvas></div>
+<div id="panel">
+  <div id="title">DMA RADAR</div>
+  <div id="status">Connecting...</div>
+  <div class="sep"></div>
+  <div id="plist"></div>
+  <div id="controls">
+    <button onclick="chRange(50)">Range +</button>
+    <button onclick="chRange(-50)">Range -</button>
+  </div>
+  <div id="web-info"></div>
+  <div id="conn"></div>
+</div>
+</div>
+<script>
+const C=document.getElementById('c'),X=C.getContext('2d');
+let D={game:'',count:0,range:200,local:{x:0,y:0,z:0,yaw:0,team:0},scale:100,players:[]};
+let range=200,fails=0;
+
+function sz(){
+  const b=document.getElementById('radar-box');
+  const s=Math.min(b.clientWidth,b.clientHeight)-20;
+  const dpr=window.devicePixelRatio||1;
+  C.width=s*dpr;C.height=s*dpr;
+  C.style.width=s+'px';C.style.height=s+'px';
+  X.setTransform(dpr,0,0,dpr,0,0);
+  return s;
+}
+window.addEventListener('resize',()=>sz());
+
+function chRange(d){range=Math.max(50,Math.min(800,range+d))}
+
+function deg2rad(d){return d*Math.PI/180}
+
+function draw(){
+  const s=sz(),cx=s/2,cy=s/2,r=s/2-10;
+  X.clearRect(0,0,s,s);
+
+  // Background
+  X.beginPath();X.arc(cx,cy,r,0,Math.PI*2);
+  X.fillStyle='#141a14';X.fill();
+
+  // Grid rings
+  for(let f of[1,.75,.5,.25]){
+    X.beginPath();X.arc(cx,cy,r*f,0,Math.PI*2);
+    X.strokeStyle='#1e281e';X.lineWidth=1;X.stroke();
+  }
+  // Crosshair
+  X.beginPath();X.moveTo(cx-r,cy);X.lineTo(cx+r,cy);
+  X.moveTo(cx,cy-r);X.lineTo(cx,cy+r);
+  X.strokeStyle='#232d23';X.stroke();
+
+  // Compass
+  const yaw=deg2rad(D.local.yaw||0);
+  const dirs=['N','E','S','W'],angs=[0,90,180,270];
+  X.font='11px Consolas';X.fillStyle='#647864';X.textAlign='center';X.textBaseline='middle';
+  for(let i=0;i<4;i++){
+    const a=deg2rad(angs[i])-yaw;
+    X.fillText(dirs[i],cx+Math.sin(a)*(r+14),cy-Math.cos(a)*(r+14));
+  }
+
+  // Range label
+  X.font='10px Consolas';X.fillStyle='#3c503c';X.textAlign='right';
+  X.fillText(range+'m',cx+r-4,cy+14);
+
+  // Local player
+  X.beginPath();X.arc(cx,cy,5,0,Math.PI*2);
+  X.fillStyle='#00c8ff';X.fill();
+  X.beginPath();X.moveTo(cx,cy);X.lineTo(cx,cy-16);
+  X.strokeStyle='#00c8ff';X.lineWidth=2;X.stroke();
+
+  const sc=D.scale||100;
+  // Enemy dots
+  for(const p of D.players){
+    let wx=(p.x-D.local.x)/sc, wy=(p.y-D.local.y)/sc;
+    const a=-yaw;
+    const rx=wx*Math.cos(a)-wy*Math.sin(a);
+    const ry=wx*Math.sin(a)+wy*Math.cos(a);
+    const scale=r/range;
+    let px=cx+rx*scale, py=cy-ry*scale;
+    const dd=Math.sqrt((px-cx)**2+(py-cy)**2);
+    if(dd>r-4){
+      const ang=Math.atan2(px-cx,cy-py);
+      px=cx+Math.sin(ang)*(r-4);
+      py=cy-Math.cos(ang)*(r-4);
+    }
+    const hpp=p.mhp>0?p.hp/p.mhp:1;
+    const col=hpp<.3?'#ffff00':'#ff3232';
+    const ds=p.d<50?6:p.d<150?5:4;
+    X.beginPath();X.arc(px,py,ds,0,Math.PI*2);
+    X.fillStyle=col;X.fill();
+    X.font='10px Consolas';X.fillStyle='#b4b4b4';X.textAlign='left';X.textBaseline='middle';
+    X.fillText(Math.round(p.d)+'',px+ds+3,py);
+  }
+
+  requestAnimationFrame(draw);
+}
+
+async function poll(){
+  try{
+    const r=await fetch('/api/data');
+    if(!r.ok)throw 0;
+    D=await r.json();
+    range=D.range||range;
+    fails=0;
+    document.getElementById('title').textContent=(D.game||'DMA')+' RADAR';
+    document.getElementById('status').textContent='Enemies: '+D.count+'  Range: '+range+'m';
+    document.getElementById('conn').textContent='Connected';
+    document.getElementById('conn').style.color='#4a4';
+
+    const pl=document.getElementById('plist');
+    let h='';
+    for(const p of D.players.slice(0,20)){
+      const nm=p.n||'Enemy';
+      const hpp=p.mhp>0?p.hp/p.mhp:1;
+      const r=Math.round(255*(1-hpp)),g=Math.round(255*hpp);
+      h+='<div class="enemy">'+nm+'  '+Math.round(p.d)+'m  '+p.hp+'HP</div>';
+      h+='<div class="hpbar"><div style="width:'+Math.round(hpp*100)+'%;background:rgb('+r+','+g+',0)"></div></div>';
+    }
+    pl.innerHTML=h;
+  }catch(e){
+    fails++;
+    document.getElementById('conn').textContent='Disconnected (retry '+ fails+')';
+    document.getElementById('conn').style.color='#a44';
+  }
+  setTimeout(poll,100);
+}
+
+draw();
+poll();
+document.getElementById('web-info').textContent='Share this URL with teammates. Works on phone/tablet/any browser.';
+</script>
+</body></html>)HTML";
+
+    static void HandleClient(SOCKET client) {
+        char buf[4096];
+        int n = recv(client, buf, sizeof(buf)-1, 0);
+        if (n <= 0) { closesocket(client); return; }
+        buf[n] = 0;
+
+        std::string response;
+        if (strstr(buf, "GET /api/data")) {
+            std::string json = BuildJSON();
+            response = "HTTP/1.1 200 OK\r\n"
+                       "Content-Type: application/json\r\n"
+                       "Access-Control-Allow-Origin: *\r\n"
+                       "Cache-Control: no-cache\r\n"
+                       "Content-Length: " + std::to_string(json.size()) + "\r\n"
+                       "Connection: close\r\n\r\n" + json;
+        } else if (strstr(buf, "GET / ") || strstr(buf, "GET / HTTP") ||
+                   strstr(buf, "GET /index") || strstr(buf, "GET /radar")) {
+            std::string body = HTML_PAGE;
+            response = "HTTP/1.1 200 OK\r\n"
+                       "Content-Type: text/html; charset=utf-8\r\n"
+                       "Cache-Control: no-cache\r\n"
+                       "Content-Length: " + std::to_string(body.size()) + "\r\n"
+                       "Connection: close\r\n\r\n" + body;
+        } else {
+            response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        }
+        send(client, response.c_str(), (int)response.size(), 0);
+        closesocket(client);
+    }
+
+    static void ServerThread() {
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2,2), &wsa);
+
+        SOCKET srv = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (srv == INVALID_SOCKET) {
+            printf("[!] Web radar: socket() failed\n");
+            return;
+        }
+        int opt = 1;
+        setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt));
+
+        sockaddr_in addr = {};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons((u_short)port);
+
+        if (bind(srv, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            printf("[!] Web radar: port %d in use, trying %d\n", port, port+1);
+            port++;
+            addr.sin_port = htons((u_short)port);
+            if (bind(srv, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+                printf("[!] Web radar: bind failed\n");
+                closesocket(srv);
+                return;
+            }
+        }
+
+        listen(srv, 16);
+
+        // Print all local IPs so user can share
+        char hostname[256];
+        gethostname(hostname, sizeof(hostname));
+        addrinfo hints = {}, *res = nullptr;
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo(hostname, nullptr, &hints, &res) == 0) {
+            printf("[+] Web radar URLs:\n");
+            for (auto* p = res; p; p = p->ai_next) {
+                char ip[64];
+                inet_ntop(AF_INET, &((sockaddr_in*)p->ai_addr)->sin_addr, ip, sizeof(ip));
+                printf("    http://%s:%d\n", ip, port);
+            }
+            freeaddrinfo(res);
+        }
+        printf("    http://localhost:%d\n", port);
+
+        fd_set readfds;
+        timeval tv;
+        while (running) {
+            FD_ZERO(&readfds);
+            FD_SET(srv, &readfds);
+            tv.tv_sec = 1; tv.tv_usec = 0;
+            if (select(0, &readfds, nullptr, nullptr, &tv) > 0) {
+                SOCKET client = accept(srv, nullptr, nullptr);
+                if (client != INVALID_SOCKET)
+                    std::thread(HandleClient, client).detach();
+            }
+        }
+        closesocket(srv);
+        WSACleanup();
+    }
+
+    static void Start() {
+        std::thread(ServerThread).detach();
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Built-in game aliases (generate default config if no ini exists)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -797,6 +1110,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     std::string gameAlias;
     std::string device = "fpga";
     std::string processOverride;
+    int webPort = 8888;
 
     // Parse command line
     char* cmd = lpCmdLine;
@@ -813,6 +1127,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
             cmd += 9;
             char* end = strchr(cmd, ' ');
             device = end ? std::string(cmd, end) : std::string(cmd);
+            cmd = end ? end : cmd + strlen(cmd);
+        } else if (strncmp(cmd, "--port=", 7) == 0 || strncmp(cmd, "--port ", 7) == 0) {
+            cmd += 7;
+            char* end = strchr(cmd, ' ');
+            std::string pv = end ? std::string(cmd, end) : std::string(cmd);
+            webPort = atoi(pv.c_str());
+            if (webPort < 1 || webPort > 65535) webPort = 8888;
             cmd = end ? end : cmd + strlen(cmd);
         } else if (strncmp(cmd, "--proc=", 7) == 0) {
             cmd += 7;
@@ -919,6 +1240,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     }
     printf("[+] Base: 0x%llX\n", (unsigned long long)g_base);
 
+    // Start web radar server
+    WebRadar::port = webPort;
+    WebRadar::Start();
+
     printf("[+] Radar starting  |  PgUp/PgDn = Range  |  END = Exit\n\n");
 
     std::thread dataThread([&]() {
@@ -931,6 +1256,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
 
     Radar::Run();
 
+    WebRadar::running = false;
     pClose(g_vmm);
     return 0;
 }
