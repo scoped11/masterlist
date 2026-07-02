@@ -2369,6 +2369,7 @@ namespace OffsetDump
 		uint32_t entityCount;
 		uint32_t entityStride;
 		int      entityCountVal;
+		int      qualityScore;
 		bool     valid;
 	};
 
@@ -2869,14 +2870,13 @@ namespace OffsetDump
 		// ============================================================
 		auto probeEntityList = [](DWORD64 gmPtr) -> DiscoveredOffsets {
 			DiscoveredOffsets d = {};
-			int bestCount = 0;
+			int bestScore = 0;
 
 			for (uint32_t off = 0; off < 0x500; off += 8)
 			{
 				DWORD64 ptr = read<DWORD64>(gmPtr + off);
 				if (ptr < 0x10000 || ptr > 0x7FF000000000) continue;
 
-				// Check nearby int32 for count (at off+8, off-8, off+16)
 				uint32_t countOffsets[] = { off + 8, off - 8, off + 16, off + 4 };
 				for (auto coff : countOffsets)
 				{
@@ -2885,15 +2885,29 @@ namespace OffsetDump
 					if (cnt < 1 || cnt > 50) continue;
 
 					int validPtrs = 0;
+					int vtableInModule = 0;
+					DWORD64 firstVtable = 0;
+					int sameVtable = 0;
 					for (int e = 0; e < min(cnt, 15); e++)
 					{
 						DWORD64 ent = read<DWORD64>(ptr + e * 8);
-						if (ent > 0x10000 && ent < 0x7FF000000000) validPtrs++;
+						if (ent < 0x10000 || ent > 0x7FF000000000) continue;
+						validPtrs++;
+						DWORD64 vt = read<DWORD64>(ent);
+						if (vt > 0x7FF000000000 && vt < 0x7FFF00000000)
+						{
+							vtableInModule++;
+							if (!firstVtable) firstVtable = vt;
+							else if (vt == firstVtable) sameVtable++;
+						}
 					}
 
-					if (validPtrs >= 1 && validPtrs > bestCount)
+					if (validPtrs < 1) continue;
+					// Score: heavily weight vtable validity and consistency
+					int score = validPtrs + vtableInModule * 10 + sameVtable * 20;
+					if (score > bestScore)
 					{
-						bestCount = validPtrs;
+						bestScore = score;
 						d.entityList = off;
 						d.entityCount = coff;
 						d.entityStride = 8;
@@ -3127,7 +3141,18 @@ namespace OffsetDump
 					Log("[*]   Entity[%d] @ 0x%llX  vtable=0x%llX  pos=(%.2f, %.2f, %.2f)", ei, ent, vtbl, px, py, pz);
 				}
 
-				if (!r.discovered.valid || d.entityCountVal > r.discovered.entityCountVal)
+				int vtableValid = 0;
+				for (int ei = 0; ei < min(d.entityCountVal, 8); ei++)
+				{
+					DWORD64 ent = read<DWORD64>(listPtr + ei * d.entityStride);
+					if (ent < 0x10000) continue;
+					DWORD64 vt = read<DWORD64>(ent);
+					if (vt > 0x7FF000000000 && vt < 0x7FFF00000000) vtableValid++;
+				}
+				int score = vtableValid * 10 + d.entityCountVal + (fm.position ? 50 : 0);
+				d.qualityScore = score;
+
+				if (!r.discovered.valid || score > r.discovered.qualityScore)
 				{
 					r.discovered = d;
 					r.entityFields = fm;
