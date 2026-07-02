@@ -3,6 +3,7 @@
 #include "dma_features.h"
 #include "dma_dumper.h"
 #include "dma_webserver.h"
+#include "dma_offsetdump.h"
 #include <thread>
 
 #include "../external/unturned.cpp"
@@ -13,26 +14,36 @@ int main(int argc, char* argv[])
 {
 	SetConsoleTitleA("Coopyy DMA - RADAR PC");
 	printf("=== Coopyy DMA (Streamproof) ===\n");
-	printf("Run this on your RADAR PC (PC2)\n");
-	printf("Target game: Unturned\n\n");
+	printf("Run this on your RADAR PC (PC2)\n\n");
 
-	WebServer::Start(9222);
-	Log("[+] Web menu live on port 9222");
-	Log("    Open http://localhost:9222 or http://<this-pc-ip>:9222\n");
+	if (argc > 1 && strcmp(argv[1], "--offsets") == 0)
+	{
+		printf("=== DMA Offset Dumper (Multi-Game) ===\n");
+		printf("Supported: Unturned (Mono), Rust (IL2CPP), R6 Siege, Apex Legends\n");
+		printf("Also auto-detects engine type for unknown games.\n\n");
+		if (!DMA::Init()) { printf("DMA init failed.\n"); _getch(); return 1; }
+		OffsetDump::AutoDump();
+		DMA::Close();
+		printf("\nDone. Press any key to exit.\n");
+		_getch();
+		return 0;
+	}
 
 	if (argc > 1 && strcmp(argv[1], "--list") == 0)
 	{
 		printf("=== DMA Process List ===\n");
-		if (!DMA::Init()) goto idle;
+		if (!DMA::Init()) { printf("DMA init failed.\n"); _getch(); return 1; }
 		DMA::ListProcesses();
 		DMA::Close();
-		goto idle;
+		printf("Press any key to exit.\n");
+		_getch();
+		return 0;
 	}
 
 	if (argc > 1 && strcmp(argv[1], "--dump") == 0)
 	{
 		printf("=== DMA PE Dumper Mode ===\n");
-		if (!DMA::Init()) goto idle;
+		if (!DMA::Init()) { printf("DMA init failed.\n"); _getch(); return 1; }
 
 		bool found = false;
 		const char* targetName = (argc > 2) ? argv[2] : nullptr;
@@ -67,8 +78,14 @@ int main(int argc, char* argv[])
 
 		Dumper::DumpAllModules();
 		DMA::Close();
-		goto idle;
+		printf("\nDone. Press any key to exit.\n");
+		_getch();
+		return 0;
 	}
+
+	WebServer::Start(9222);
+	Log("[+] Web menu live on port 9222");
+	Log("    Open http://localhost:9222 or http://<this-pc-ip>:9222\n");
 
 	if (!DMA::Init()) {
 		Log("[-] DMA init failed. Web menu still running.");

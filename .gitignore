@@ -19,6 +19,5 @@
 *.tlog
 *.log
 
-# Game dumps
-Dumps/
+# Game dumps (local only, not tracked)
 game_dumps/

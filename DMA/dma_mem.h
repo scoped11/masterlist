@@ -74,8 +74,8 @@ namespace DMA
 {
 	inline bool Init()
 	{
-		LPCSTR args[] = { "", "-device", "fpga", "-v", "-printf" };
-		hVMM = VMMDLL_Initialize(5, args);
+		LPCSTR args[] = { "", "-device", "fpga" };
+		hVMM = VMMDLL_Initialize(3, args);
 		if (!hVMM)
 		{
 			Log("[-] VMMDLL_Initialize failed. Is the DMA card connected via Data port?");
