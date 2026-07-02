@@ -33,11 +33,13 @@
 #include <atomic>
 #include <algorithm>
 #include <sstream>
+#include <wininet.h>
 
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "wininet.lib")
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -140,6 +142,85 @@ static std::string Str(const char* key, const char* fallback = "") {
 static uint64_t Off(const char* key, uint64_t fallback = 0) {
     auto it = g_offsets.find(key);
     return (it != g_offsets.end()) ? it->second : fallback;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Auto-updater — fetch latest offsets from GitHub on startup
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static const char* GITHUB_RAW_BASE =
+    "https://raw.githubusercontent.com/scoped11/masterlist/master/cheat/dma/";
+
+static std::string HttpGet(const char* url) {
+    HINTERNET hInet = InternetOpenA("DmaRadar/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    if (!hInet) return "";
+    HINTERNET hUrl = InternetOpenUrlA(hInet, url, NULL, 0,
+        INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_SECURE, 0);
+    if (!hUrl) { InternetCloseHandle(hInet); return ""; }
+
+    std::string result;
+    char buf[8192];
+    DWORD bytesRead;
+    while (InternetReadFile(hUrl, buf, sizeof(buf), &bytesRead) && bytesRead > 0)
+        result.append(buf, bytesRead);
+
+    InternetCloseHandle(hUrl);
+    InternetCloseHandle(hInet);
+    return result;
+}
+
+static std::string ReadFileStr(const char* path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return "";
+    return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+}
+
+static bool WriteFileStr(const char* path, const std::string& data) {
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (!f.is_open()) return false;
+    f.write(data.data(), data.size());
+    return f.good();
+}
+
+static bool TryAutoUpdate(const std::string& gameAlias, const std::string& localPath) {
+    std::string filename = gameAlias + "_offsets.ini";
+    std::string url = std::string(GITHUB_RAW_BASE) + filename;
+
+    printf("[*] Checking for offset updates: %s\n", filename.c_str());
+
+    std::string remote = HttpGet(url.c_str());
+    if (remote.empty() || remote.size() < 20) {
+        printf("[!] No remote offsets found (offline or not published yet)\n");
+        return false;
+    }
+
+    // Check if remote starts with a comment or section header (valid ini)
+    if (remote[0] != '#' && remote[0] != ';' && remote[0] != '[') {
+        printf("[!] Remote response doesn't look like an ini file, skipping\n");
+        return false;
+    }
+
+    std::string local = ReadFileStr(localPath.c_str());
+
+    // Normalize line endings for comparison
+    std::string remoteNorm = remote, localNorm = local;
+    remoteNorm.erase(std::remove(remoteNorm.begin(), remoteNorm.end(), '\r'), remoteNorm.end());
+    localNorm.erase(std::remove(localNorm.begin(), localNorm.end(), '\r'), localNorm.end());
+
+    if (remoteNorm == localNorm) {
+        printf("[+] Offsets are up to date\n");
+        return false;
+    }
+
+    // Different — save new version
+    if (WriteFileStr(localPath.c_str(), remote)) {
+        printf("[+] UPDATED offsets from GitHub -> %s\n", localPath.c_str());
+        return true;
+    } else {
+        printf("[!] Failed to write updated offsets to %s\n", localPath.c_str());
+        return false;
+    }
 }
 
 
@@ -1111,6 +1192,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     std::string device = "fpga";
     std::string processOverride;
     int webPort = 8888;
+    bool autoUpdate = true;
 
     // Parse command line
     char* cmd = lpCmdLine;
@@ -1135,6 +1217,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
             webPort = atoi(pv.c_str());
             if (webPort < 1 || webPort > 65535) webPort = 8888;
             cmd = end ? end : cmd + strlen(cmd);
+        } else if (strncmp(cmd, "--no-update", 11) == 0) {
+            autoUpdate = false;
+            cmd += 11;
         } else if (strncmp(cmd, "--proc=", 7) == 0) {
             cmd += 7;
             char* end = strchr(cmd, ' ');
@@ -1169,6 +1254,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         if (configPath.empty()) {
             configPath = gameAlias + "_offsets.ini";
         }
+    }
+
+    // Auto-update offsets from GitHub before loading
+    if (autoUpdate && !gameAlias.empty()) {
+        std::string updatePath = configPath.empty() ? (gameAlias + "_offsets.ini") : configPath;
+        TryAutoUpdate(gameAlias, updatePath);
     }
 
     // Load config file if it exists
