@@ -173,6 +173,8 @@ namespace O {
     uint64_t StatusManagerLocalEntity;
     // Level / actor array
     uint64_t PersistentLevel, Actors, ActorCount;
+    // Direct entity reads (AnvilNext — no pawn indirection)
+    uint64_t DirectPosition, DirectHeadPosition;
     // Actor
     uint64_t RootComponent, ActorMesh, RelativeLocation;
     uint64_t ComponentToWorld, ComponentToWorldMatrix;
@@ -220,6 +222,12 @@ namespace O {
         PersistentLevel        = Off("PersistentLevel", 0x0);
         Actors                 = Off("Actors", 0x0);
         ActorCount             = Off("ActorCount", 0x0);
+        // EntityList/EntityCount are aliases for Actors/ActorCount
+        if (!Actors)     Actors     = Off("EntityList", 0x0);
+        if (!ActorCount) ActorCount = Off("EntityCount", 0x0);
+        // Direct entity reads (skip pawn indirection)
+        DirectPosition         = Off("DirectPosition", 0x0);
+        DirectHeadPosition     = Off("DirectHeadPosition", 0x0);
         // Actor
         RootComponent          = Off("RootComponent", 0x0);
         ActorMesh              = Off("ActorMesh", 0x0);
@@ -537,6 +545,8 @@ static uint64_t g_playerController = 0;
 static uint64_t g_gameManager = 0;
 
 static Vec3 GetEntityPosition(uint64_t entity) {
+    if (O::DirectPosition)
+        return rpm<Vec3>(entity + O::DirectPosition);
     if (O::EntityPawn) {
         uint64_t pawn = ReadEncPtr(entity + O::EntityPawn);
         if (pawn && O::RootComponent) {
@@ -556,6 +566,8 @@ static Vec3 GetEntityPosition(uint64_t entity) {
 }
 
 static Vec3 GetEntityHeadPos(uint64_t entity) {
+    if (O::DirectHeadPosition)
+        return rpm<Vec3>(entity + O::DirectHeadPosition);
     if (O::EntityPawn && O::SkeletonHeadPosition) {
         uint64_t pawn = ReadEncPtr(entity + O::EntityPawn);
         if (pawn) return rpm<Vec3>(pawn + O::SkeletonHeadPosition);
