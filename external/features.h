@@ -174,7 +174,7 @@ namespace Features
 		if (Offsets::pluginSpeedMultiplier)
 			movement->pluginSpeedMultiplier_set(Config::speedHack ? Config::speedMultiplier : 1.0f);
 
-		if (Offsets::pluginJumpMultiplier)
+		if (Offsets::pluginJumpMultiplier && !Config::flyHack)
 			movement->pluginJumpMultiplier_set(Config::superJump ? Config::jumpMultiplier : 1.0f);
 
 		uintptr_t vehiclePtr = 0;
@@ -182,31 +182,28 @@ namespace Features
 			vehiclePtr = movement->vehicle();
 		bool inVehicle = vehiclePtr && vehiclePtr > 0x10000;
 
-		bool shouldZeroGravity = Config::flyHack || (Config::vehicleFly && inVehicle);
-
-		if (Offsets::pluginGravityMultiplier)
-			movement->pluginGravityMultiplier_set(shouldZeroGravity ? 0.0f : 1.0f);
-
-		if (Config::flyHack && Offsets::velocity)
+		if (Config::flyHack)
 		{
-			vector3 vel = movement->velocity();
+			bool wantDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
 
-			if (GetAsyncKeyState(VK_SPACE) & 0x8000)
-			{
-				vel.y = 18.0f;
-			}
-			else if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
-			{
-				vel.y = -18.0f;
-				if (Offsets::pendingLaunchVelocity)
-					movement->pendingLaunchVelocity_set({ 0, -20.0f, 0 });
-			}
-			else
-			{
-				vel.y = 0.0f;
-			}
+			if (Offsets::pluginGravityMultiplier)
+				movement->pluginGravityMultiplier_set(wantDown ? 2.0f : 0.15f);
 
-			movement->velocity_set(vel);
+			if (Offsets::pluginJumpMultiplier)
+				movement->pluginJumpMultiplier_set(3.0f);
+
+			if (Offsets::_isGrounded)
+				movement->isGrounded_set(true);
+		}
+		else if (Config::vehicleFly && inVehicle)
+		{
+			if (Offsets::pluginGravityMultiplier)
+				movement->pluginGravityMultiplier_set(0.0f);
+		}
+		else
+		{
+			if (Offsets::pluginGravityMultiplier)
+				movement->pluginGravityMultiplier_set(1.0f);
 		}
 
 		if (Config::vehicleFly && inVehicle)

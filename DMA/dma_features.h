@@ -352,7 +352,7 @@ namespace Features
 			movement->pluginSpeedMultiplier_set(mul);
 		}
 
-		if (Offsets::pluginJumpMultiplier)
+		if (Offsets::pluginJumpMultiplier && !Config::flyHack)
 		{
 			float jmul = 1.0f;
 			if (Config::superJump)
@@ -370,39 +370,16 @@ namespace Features
 
 		if (Config::flyHack)
 		{
+			bool wantDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+
 			if (Offsets::pluginGravityMultiplier)
-				movement->pluginGravityMultiplier_set(0.01f);
+				movement->pluginGravityMultiplier_set(wantDown ? 2.0f : 0.15f);
+
+			if (Offsets::pluginJumpMultiplier)
+				movement->pluginJumpMultiplier_set(3.0f);
 
 			if (Offsets::_isGrounded)
 				movement->isGrounded_set(true);
-
-			bool wantUp = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
-			bool wantDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-
-			if (Offsets::pendingLaunchVelocity)
-			{
-				if (wantUp && ++flyPulseTimer >= 3)
-				{
-					movement->pendingLaunchVelocity_set({ 0, Config::flySpeed, 0 });
-					flyPulseTimer = 0;
-				}
-				else if (wantDown && ++flyPulseTimer >= 3)
-				{
-					movement->pendingLaunchVelocity_set({ 0, -Config::flySpeed, 0 });
-					flyPulseTimer = 0;
-				}
-				else if (!wantUp && !wantDown)
-				{
-					if (Offsets::velocity)
-					{
-						vector3 vel = movement->velocity();
-						vel.y = 0.0f;
-						movement->velocity_set(vel);
-					}
-					movement->pendingLaunchVelocity_set({ 0, 0, 0 });
-					flyPulseTimer = 0;
-				}
-			}
 		}
 		else if (Config::vehicleFly && inVehicle)
 		{
@@ -1067,26 +1044,32 @@ namespace Features
 			auto igo = ((SDG::InteractableItem*)item)->gameObject();
 			if (!igo) continue;
 			auto it = igo->transform();
-			vector3 itemPos = it.position();
+			vector3 itemWorldPos = it.position();
+			vector3 itemLocalPos = it.localPosition();
 
-			float dist = Math::Distance(playerPos, itemPos);
+			float dist = Math::Distance(playerPos, itemWorldPos);
 			if (dist < 0.5f || dist > Config::lootRadius) continue;
 
 			if (savedPosCount < 256)
 			{
 				savedPositions[savedPosCount].itemGO = (uintptr_t)igo;
-				savedPositions[savedPosCount].origPos = itemPos;
+				savedPositions[savedPosCount].origPos = itemLocalPos;
 				savedPosCount++;
 			}
 
 			float angle = (float)moved * 0.39269908f;
 			float r = 1.5f + (float)(moved / 10) * 0.2f;
-			vector3 newPos = {
+			vector3 targetWorld = {
 				playerPos.x + cosf(angle) * r,
 				playerPos.y - 0.5f,
 				playerPos.z + sinf(angle) * r
 			};
-			it.setLocalPosition(newPos);
+			vector3 newLocal = {
+				itemLocalPos.x + (targetWorld.x - itemWorldPos.x),
+				itemLocalPos.y + (targetWorld.y - itemWorldPos.y),
+				itemLocalPos.z + (targetWorld.z - itemWorldPos.z)
+			};
+			it.setLocalPosition(newLocal);
 			moved++;
 		}
 	}
