@@ -170,6 +170,43 @@ static bool g_menuOpen = false;
 static int g_activeTab = 0;
 static HFONT g_menuFont = NULL;
 static HFONT g_menuFontBold = NULL;
+static char g_wndClass[16];
+static char g_menuTitle[48];
+static char g_statusOk[32];
+static char g_statusBad[32];
+
+#pragma optimize("", off)
+static void initRuntimeStrings()
+{
+	unsigned seed = GetTickCount() ^ (unsigned)GetCurrentProcessId();
+	for (int i = 0; i < 10; i++) {
+		seed = seed * 1103515245 + 12345;
+		g_wndClass[i] = 'a' + ((seed >> 16) % 26);
+	}
+	g_wndClass[10] = 0;
+
+	char* p;
+	p = g_menuTitle;
+	*p++='p'; *p++='e'; *p++='n'; *p++='i'; *p++='s'; *p++='f'; *p++='i'; *p++='n'; *p++='g'; *p++='e'; *p++='r';
+	*p++=' '; *p++='D'; *p++='M'; *p++='A';
+	*p++=' '; *p++=' '; *p++='|'; *p++=' '; *p++=' ';
+	*p++='F'; *p++='1'; *p++=' '; *p++='c'; *p++='l'; *p++='o'; *p++='s'; *p++='e';
+	*p = 0;
+
+	p = g_statusOk;
+	*p++='D'; *p++='M'; *p++='A'; *p++=' '; *p++='E'; *p++='S'; *p++='P';
+	*p++=' '; *p++='|'; *p++=' ';
+	*p++='S'; *p++='t'; *p++='r'; *p++='e'; *p++='a'; *p++='m'; *p++='p'; *p++='r'; *p++='o'; *p++='o'; *p++='f';
+	*p = 0;
+
+	p = g_statusBad;
+	*p++='D'; *p++='M'; *p++='A'; *p++=' '; *p++='E'; *p++='S'; *p++='P';
+	*p++=' '; *p++='|'; *p++=' ';
+	*p++='C'; *p++='o'; *p++='n'; *p++='n'; *p++='e'; *p++='c'; *p++='t'; *p++='i'; *p++='n'; *p++='g';
+	*p++='.'; *p++='.'; *p++='.';
+	*p = 0;
+}
+#pragma optimize("", on)
 
 // ============ JSON HELPERS ============
 
@@ -669,7 +706,7 @@ static void RenderMenu(HDC hdc, int sw, int sh, const FullConfig& fc)
 	DrawRect(hdc, MENU_X, MENU_Y, MENU_W, menuH, RGB(55, 55, 95));
 
 	HFONT oldFont = (HFONT)SelectObject(hdc, g_menuFontBold);
-	DrawText2(hdc, MENU_X + 10, MENU_Y + 6, "penisfinger DMA  |  F1 close", RGB(100, 170, 255), g_menuFontBold);
+	DrawText2(hdc, MENU_X + 10, MENU_Y + 6, g_menuTitle, RGB(100, 170, 255), g_menuFontBold);
 	DrawLine(hdc, MENU_X, MENU_Y + TITLE_H, MENU_X + MENU_W, MENU_Y + TITLE_H, RGB(55, 55, 95));
 
 	int tabW = MENU_W / TAB_COUNT;
@@ -777,15 +814,12 @@ int main(int argc, char* argv[])
 	if (argc >= 2) strncpy_s(g_serverIP, argv[1], sizeof(g_serverIP) - 1);
 	if (argc >= 3) g_serverPort = atoi(argv[2]);
 
-	printf("=== CoopyyDMA ESP Client ===\n");
-	printf("Server: %s:%d\n", g_serverIP, g_serverPort);
-	printf("Looking for Unturned window...\n");
+	FreeConsole();
+	initRuntimeStrings();
 
 	WSADATA wsa;
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-		printf("WSAStartup failed\n");
+	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
 		return 1;
-	}
 
 	g_gameWnd = FindGameWindow();
 	while (!g_gameWnd && g_running) {
@@ -800,28 +834,24 @@ int main(int argc, char* argv[])
 	ClientToScreen(g_gameWnd, &topLeft);
 	int sw = gameRect.right - gameRect.left;
 	int sh = gameRect.bottom - gameRect.top;
-	printf("Found Unturned: %dx%d at (%d,%d)\n", sw, sh, topLeft.x, topLeft.y);
-
 	WNDCLASSEXA wc = {};
 	wc.cbSize = sizeof(wc);
 	wc.style = CS_HREDRAW | CS_VREDRAW;
 	wc.lpfnWndProc = WndProc;
 	wc.hInstance = GetModuleHandle(NULL);
-	wc.lpszClassName = "CoopyyESP";
+	wc.lpszClassName = g_wndClass;
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 	RegisterClassExA(&wc);
 
 	g_overlay = CreateWindowExA(
-		WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-		"CoopyyESP", "",
+		WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
+		g_wndClass, "",
 		WS_POPUP,
 		topLeft.x, topLeft.y, sw, sh,
 		NULL, NULL, GetModuleHandle(NULL), NULL);
 
-	if (!g_overlay) {
-		printf("Failed to create overlay window\n");
+	if (!g_overlay)
 		return 1;
-	}
 
 	SetLayeredWindowAttributes(g_overlay, RGB(0, 0, 0), 0, LWA_COLORKEY);
 	SetWindowDisplayAffinity(g_overlay, WDA_EXCLUDEFROMCAPTURE);
@@ -841,16 +871,10 @@ int main(int argc, char* argv[])
 		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
 		CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
 
-	printf("Overlay created (stream-proof). Starting data threads...\n");
-
 	std::thread t1(dataThread);
 	std::thread t2(configThread);
 	t1.detach();
 	t2.detach();
-
-	printf("ESP active. Press Ctrl+C to exit.\n\n");
-
-	bool wasConnected = false;
 
 	while (g_running) {
 		MSG msg;
@@ -860,9 +884,6 @@ int main(int argc, char* argv[])
 			DispatchMessageA(&msg);
 		}
 		if (!g_running) break;
-
-		if (g_connected && !wasConnected) { printf("[+] Connected to DMA server\n"); wasConnected = true; }
-		if (!g_connected && wasConnected) { printf("[-] Lost connection\n"); wasConnected = false; }
 
 		static bool f1WasDown = false;
 		bool f1Down = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
@@ -930,9 +951,9 @@ int main(int argc, char* argv[])
 		RenderMenu(memDC, sw, sh, localFcfg);
 
 		if (g_connected)
-			DrawText2(memDC, 5, sh - 20, "DMA ESP | Streamproof", RGB(0, 255, 100), g_fontSmall);
+			DrawText2(memDC, 5, sh - 20, g_statusOk, RGB(0, 255, 100), g_fontSmall);
 		else
-			DrawText2(memDC, 5, sh - 20, "DMA ESP | Connecting...", RGB(255, 100, 0), g_fontSmall);
+			DrawText2(memDC, 5, sh - 20, g_statusBad, RGB(255, 100, 0), g_fontSmall);
 
 		BitBlt(hdc, 0, 0, sw, sh, memDC, 0, 0, SRCCOPY);
 
@@ -949,7 +970,7 @@ int main(int argc, char* argv[])
 	if (g_menuFont) DeleteObject(g_menuFont);
 	if (g_menuFontBold) DeleteObject(g_menuFontBold);
 	if (g_overlay) DestroyWindow(g_overlay);
-	UnregisterClassA("CoopyyESP", GetModuleHandle(NULL));
+	UnregisterClassA(g_wndClass, GetModuleHandle(NULL));
 	WSACleanup();
 	return 0;
 }
