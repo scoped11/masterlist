@@ -439,7 +439,30 @@ All in `build_scripts/`:
 
 ---
 
-## 17. Session Transcripts
+## 17. SWHE External Cheat (Usermode-Only)
+
+Unturned external cheat using the **WaryasSWHE** (Shatter Window Hook Exploit) for memory access. No kernel driver, no mapper, no admin. Pure usermode exploit via `SetWindowsHookExA` + `SendMessageA(WM_APPCOMMAND)` through SHCore.dll shared memory.
+
+See **[swhe/README.md](swhe/README.md)** for full setup guide, architecture docs, and how to add features / port to other games.
+
+| File | Description |
+|------|-------------|
+| `swhe/source/main.cpp` | Entry point — security init, SWHE attach, Mono resolve, feature loop |
+| `swhe/source/mem.h` / `mem.cpp` | Memory interface — `read<T>()`, `write<T>()` over SWHE |
+| `swhe/source/mem_swhe.h` | SWHE wrapper — chunked R/W (0x700 limit), global CProcess/CExploit |
+| `swhe/source/mono.h` | Mono runtime reflection — class/field/method discovery |
+| `swhe/source/features.h` | All features — ESP, aimbot, weapon mods, movement, god mode |
+| `swhe/source/overlay.h` | GDI overlay — streamproof (WDA_EXCLUDEFROMCAPTURE), menu, ESP rendering |
+| `swhe/source/security.h` | Anti-debug (8 vectors), anti-dump, anti-attach, CRC32 integrity heartbeat |
+| `swhe/source/unturned.h` / `.cpp` | Game classes + Mono offset resolution |
+| `swhe/source/types/` | Game structs (SDG::Player, etc.) + Unity engine types (Transform, GameObject) |
+| `swhe/WaryasSWHE/` | Exploit source — shared memory finder, gadget scanner, hook-triggered R/W |
+| `swhe/build.cmd` | Build script |
+| `swhe/unturned_swhe.exe` | Pre-built binary |
+
+---
+
+## 18. Session Transcripts
 
 Full Claude Code conversation logs, extracted from all project sessions and organized by project.
 
