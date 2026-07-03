@@ -65,11 +65,99 @@ struct ESPConfig {
 	float aimbotFOV;
 };
 
+struct FullConfig {
+	bool vals[32] = {};
+	float floats[12] = {};
+};
+
+struct MenuItem {
+	const char* label;
+	const char* apiKey;
+	bool isSlider;
+	int boolIdx;
+	int floatIdx;
+	float sMin, sMax;
+};
+
+static const char* g_boolKeys[] = {
+	"aimbot","silentAim","noRecoil","noSpread","rapidFire","infiniteRange",
+	"extendedMelee","triggerbot","spinBot","instantReload",
+	"esp","espBoxes","espNames","espDistance","espHealth","espSnaplines",
+	"radar","vehicleESP","itemESP","zombieESP","fullbright","fovChanger","chams","streamProof",
+	"speedHack","flyHack","superJump","vehicleFly","noFallDamage","noclip",
+	"godMode","adminMode"
+};
+static const int NUM_BOOLS = sizeof(g_boolKeys) / sizeof(g_boolKeys[0]);
+
+static const char* g_floatKeys[] = {
+	"speedMultiplier","jumpMultiplier","flySpeed","aimbotFOV","aimbotSmooth",
+	"customFOV","meleeRange","lootRadius","noclipSpeed"
+};
+static const int NUM_FLOATS = sizeof(g_floatKeys) / sizeof(g_floatKeys[0]);
+
+enum Tab { TAB_COMBAT, TAB_VISUALS, TAB_MOVEMENT, TAB_PLAYER, TAB_COUNT };
+static const char* g_tabNames[] = { "Combat", "Visuals", "Movement", "Player" };
+
+static const MenuItem g_menuItems[][12] = {
+	{ // Combat
+		{"Aimbot",        "aimbot",        false, 0, -1, 0,0},
+		{"Silent Aim",    "silentAim",     false, 1, -1, 0,0},
+		{"No Recoil",     "noRecoil",      false, 2, -1, 0,0},
+		{"No Spread",     "noSpread",      false, 3, -1, 0,0},
+		{"Rapid Fire",    "rapidFire",     false, 4, -1, 0,0},
+		{"Inf. Range",    "infiniteRange", false, 5, -1, 0,0},
+		{"Ext. Melee",    "extendedMelee", false, 6, -1, 0,0},
+		{"Triggerbot",    "triggerbot",     false, 7, -1, 0,0},
+		{"Spinbot",       "spinBot",       false, 8, -1, 0,0},
+		{"Instant Reload","instantReload", false, 9, -1, 0,0},
+		{"Aim FOV",       "aimbotFOV",     true, -1, 3, 2.0f, 90.0f},
+		{"Aim Smooth",    "aimbotSmooth",  true, -1, 4, 1.0f, 20.0f},
+	},
+	{ // Visuals
+		{"ESP",           "esp",           false,10, -1, 0,0},
+		{"Boxes",         "espBoxes",      false,11, -1, 0,0},
+		{"Names",         "espNames",      false,12, -1, 0,0},
+		{"Distance",      "espDistance",    false,13, -1, 0,0},
+		{"Health",        "espHealth",     false,14, -1, 0,0},
+		{"Snaplines",     "espSnaplines",  false,15, -1, 0,0},
+		{"Radar",         "radar",         false,16, -1, 0,0},
+		{"Vehicle ESP",   "vehicleESP",    false,17, -1, 0,0},
+		{"Item ESP",      "itemESP",       false,18, -1, 0,0},
+		{"Zombie ESP",    "zombieESP",     false,19, -1, 0,0},
+		{"Fullbright",    "fullbright",    false,20, -1, 0,0},
+		{"Custom FOV",    "customFOV",     true, -1, 5, 60.0f, 160.0f},
+	},
+	{ // Movement
+		{"Speed Hack",    "speedHack",     false,24, -1, 0,0},
+		{"Fly Hack",      "flyHack",       false,25, -1, 0,0},
+		{"Super Jump",    "superJump",     false,26, -1, 0,0},
+		{"Vehicle Fly",   "vehicleFly",    false,27, -1, 0,0},
+		{"No Fall Dmg",   "noFallDamage",  false,28, -1, 0,0},
+		{"Noclip",        "noclip",        false,29, -1, 0,0},
+		{"Speed",         "speedMultiplier",true,-1, 0, 1.0f, 1.5f},
+		{"Jump",          "jumpMultiplier",true, -1, 1, 1.0f, 2.0f},
+		{"Fly Speed",     "flySpeed",      true, -1, 2, 2.0f, 15.0f},
+		{"Noclip Speed",  "noclipSpeed",   true, -1, 8, 1.0f, 15.0f},
+		{0},
+		{0},
+	},
+	{ // Player
+		{"God Mode",      "godMode",       false,30, -1, 0,0},
+		{"Admin Mode",    "adminMode",     false,31, -1, 0,0},
+		{"Loot Teleport", "lootTeleport",  false,-1, -1, 0,0},
+		{"Loot Radius",   "lootRadius",    true, -1, 7, 5.0f, 200.0f},
+		{"Melee Range",   "meleeRange",    true, -1, 6, 1.0f, 50.0f},
+		{0},{0},{0},{0},{0},{0},{0},
+	},
+};
+static const int g_menuCounts[] = { 12, 12, 10, 5 };
+
 // ============ GLOBALS ============
 
 static std::mutex g_mtx;
 static GameData g_gd = {};
 static ESPConfig g_cfg = { true, true, true, true, true, false, false, false, false, false, false, false, 15.0f };
+static FullConfig g_fcfg = {};
 static std::atomic<bool> g_running{ true };
 static std::atomic<bool> g_connected{ false };
 static char g_serverIP[128] = "192.168.1.211";
@@ -78,6 +166,10 @@ static HWND g_overlay = NULL;
 static HWND g_gameWnd = NULL;
 static HFONT g_font = NULL;
 static HFONT g_fontSmall = NULL;
+static bool g_menuOpen = false;
+static int g_activeTab = 0;
+static HFONT g_menuFont = NULL;
+static HFONT g_menuFontBold = NULL;
 
 // ============ JSON HELPERS ============
 
@@ -162,6 +254,24 @@ static std::string httpGet(const char* path)
 	auto bodyPos = resp.find("\r\n\r\n");
 	if (bodyPos == std::string::npos) return "";
 	return resp.substr(bodyPos + 4);
+}
+
+static void httpPost(const char* path)
+{
+	SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (s == INVALID_SOCKET) return;
+	DWORD timeout = 1000;
+	setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+	sockaddr_in addr = {};
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons((u_short)g_serverPort);
+	inet_pton(AF_INET, g_serverIP, &addr.sin_addr);
+	if (connect(s, (sockaddr*)&addr, sizeof(addr)) != 0) { closesocket(s); return; }
+	char req[256];
+	sprintf_s(req, "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", path, g_serverIP);
+	send(s, req, (int)strlen(req), 0);
+	char buf[256]; recv(s, buf, sizeof(buf), 0);
+	closesocket(s);
 }
 
 // ============ DATA PARSING ============
@@ -261,8 +371,15 @@ static void parseConfig(const std::string& body)
 	c.aimbotFOV = jf(j, "aimbotFOV");
 	if (c.aimbotFOV < 1.0f) c.aimbotFOV = 15.0f;
 
+	FullConfig fc = {};
+	for (int i = 0; i < NUM_BOOLS; i++)
+		fc.vals[i] = jb(j, g_boolKeys[i]);
+	for (int i = 0; i < NUM_FLOATS; i++)
+		fc.floats[i] = jf(j, g_floatKeys[i]);
+
 	std::lock_guard<std::mutex> lk(g_mtx);
 	g_cfg = c;
+	g_fcfg = fc;
 }
 
 // ============ NETWORK THREADS ============
@@ -530,6 +647,112 @@ static void RenderRadar(HDC hdc, int sw, int sh, const GameData& gd, const ESPCo
 	}
 }
 
+// ============ MENU RENDERING ============
+
+static void RenderMenu(HDC hdc, int sw, int sh, const FullConfig& fc)
+{
+	if (!g_menuOpen) return;
+
+	const int MENU_W = 300, MENU_X = 10, MENU_Y = 10;
+	const int TITLE_H = 28, TAB_H = 24, ITEM_H = 22, SLIDER_H = 20, PAD = 4;
+
+	int tabCount = g_menuCounts[g_activeTab];
+	int contentH = 0;
+	for (int i = 0; i < tabCount; i++) {
+		auto& mi = g_menuItems[g_activeTab][i];
+		if (!mi.label) continue;
+		contentH += mi.isSlider ? SLIDER_H : ITEM_H;
+	}
+	int menuH = TITLE_H + TAB_H + contentH + PAD * 2;
+
+	FillRect2(hdc, MENU_X, MENU_Y, MENU_W, menuH, RGB(14, 14, 20));
+	DrawRect(hdc, MENU_X, MENU_Y, MENU_W, menuH, RGB(55, 55, 95));
+
+	HFONT oldFont = (HFONT)SelectObject(hdc, g_menuFontBold);
+	DrawText2(hdc, MENU_X + 10, MENU_Y + 6, "penisfinger DMA  |  F1 close", RGB(100, 170, 255), g_menuFontBold);
+	DrawLine(hdc, MENU_X, MENU_Y + TITLE_H, MENU_X + MENU_W, MENU_Y + TITLE_H, RGB(55, 55, 95));
+
+	int tabW = MENU_W / TAB_COUNT;
+	int tabY = MENU_Y + TITLE_H;
+	for (int t = 0; t < TAB_COUNT; t++) {
+		int tx = MENU_X + t * tabW;
+		COLORREF bg = (t == g_activeTab) ? RGB(30, 30, 60) : RGB(18, 18, 28);
+		FillRect2(hdc, tx, tabY, tabW, TAB_H, bg);
+		DrawText2(hdc, tx + 8, tabY + 5, g_tabNames[t],
+			t == g_activeTab ? RGB(120, 180, 255) : RGB(100, 100, 130), g_menuFont);
+	}
+	DrawLine(hdc, MENU_X, tabY + TAB_H, MENU_X + MENU_W, tabY + TAB_H, RGB(55, 55, 95));
+
+	int cy = tabY + TAB_H + PAD;
+	for (int i = 0; i < tabCount; i++) {
+		auto& mi = g_menuItems[g_activeTab][i];
+		if (!mi.label) continue;
+
+		if (mi.isSlider) {
+			float val = (mi.floatIdx >= 0 && mi.floatIdx < NUM_FLOATS) ? fc.floats[mi.floatIdx] : 0;
+			char txt[64];
+			sprintf_s(txt, "%s: %.1f", mi.label, val);
+			DrawText2(hdc, MENU_X + 12, cy + 2, txt, RGB(180, 180, 200), g_menuFont);
+			int barX = MENU_X + 12, barW = MENU_W - 24, barY = cy + 14;
+			FillRect2(hdc, barX, barY, barW, 4, RGB(40, 40, 60));
+			float pct = (mi.sMax > mi.sMin) ? (val - mi.sMin) / (mi.sMax - mi.sMin) : 0;
+			if (pct < 0) pct = 0; if (pct > 1) pct = 1;
+			FillRect2(hdc, barX, barY, (int)(barW * pct), 4, RGB(100, 170, 255));
+			cy += SLIDER_H;
+		} else {
+			bool on = (mi.boolIdx >= 0 && mi.boolIdx < 32) ? fc.vals[mi.boolIdx] : false;
+			COLORREF tc = on ? RGB(100, 255, 100) : RGB(150, 60, 60);
+			DrawText2(hdc, MENU_X + 12, cy + 3, mi.label, RGB(200, 200, 210), g_menuFont);
+			const char* state = on ? "ON" : "OFF";
+			DrawText2(hdc, MENU_X + MENU_W - 50, cy + 3, state, tc, g_menuFontBold);
+			cy += ITEM_H;
+		}
+	}
+	SelectObject(hdc, oldFont);
+}
+
+static void HandleMenuClick(int mx, int my, bool isDown, const FullConfig& fc)
+{
+	if (!g_menuOpen || !isDown) return;
+
+	const int MENU_X = 10, MENU_Y = 10, MENU_W = 300;
+	const int TITLE_H = 28, TAB_H = 24, ITEM_H = 22, SLIDER_H = 20, PAD = 4;
+
+	int tabW = MENU_W / TAB_COUNT;
+	int tabY = MENU_Y + TITLE_H;
+	if (my >= tabY && my < tabY + TAB_H && mx >= MENU_X && mx < MENU_X + MENU_W) {
+		g_activeTab = (mx - MENU_X) / tabW;
+		if (g_activeTab >= TAB_COUNT) g_activeTab = TAB_COUNT - 1;
+		return;
+	}
+
+	int cy = tabY + TAB_H + PAD;
+	int tabCount = g_menuCounts[g_activeTab];
+	for (int i = 0; i < tabCount; i++) {
+		auto& mi = g_menuItems[g_activeTab][i];
+		if (!mi.label) continue;
+		int h = mi.isSlider ? SLIDER_H : ITEM_H;
+
+		if (my >= cy && my < cy + h && mx >= MENU_X && mx < MENU_X + MENU_W) {
+			if (mi.isSlider) {
+				int barX = MENU_X + 12, barW = MENU_W - 24;
+				float pct = (float)(mx - barX) / (float)barW;
+				if (pct < 0) pct = 0; if (pct > 1) pct = 1;
+				float val = mi.sMin + pct * (mi.sMax - mi.sMin);
+				char path[128];
+				sprintf_s(path, "/api/set/%s/%.2f", mi.apiKey, val);
+				std::thread([=]() { httpPost(path); }).detach();
+			} else {
+				char path[128];
+				sprintf_s(path, "/api/toggle/%s", mi.apiKey);
+				std::thread([=]() { httpPost(path); }).detach();
+			}
+			return;
+		}
+		cy += h;
+	}
+}
+
 // ============ OVERLAY WINDOW ============
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -589,7 +812,7 @@ int main(int argc, char* argv[])
 	RegisterClassExA(&wc);
 
 	g_overlay = CreateWindowExA(
-		WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+		WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
 		"CoopyyESP", "",
 		WS_POPUP,
 		topLeft.x, topLeft.y, sw, sh,
@@ -610,6 +833,13 @@ int main(int argc, char* argv[])
 	g_fontSmall = CreateFontA(12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
 		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
 		ANTIALIASED_QUALITY, DEFAULT_PITCH, "Consolas");
+
+	g_menuFont = CreateFontA(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+		CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
+	g_menuFontBold = CreateFontA(13, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+		CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
 
 	printf("Overlay created (stream-proof). Starting data threads...\n");
 
@@ -634,6 +864,29 @@ int main(int argc, char* argv[])
 		if (g_connected && !wasConnected) { printf("[+] Connected to DMA server\n"); wasConnected = true; }
 		if (!g_connected && wasConnected) { printf("[-] Lost connection\n"); wasConnected = false; }
 
+		static bool f1WasDown = false;
+		bool f1Down = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
+		if (f1Down && !f1WasDown) {
+			g_menuOpen = !g_menuOpen;
+			LONG exStyle = GetWindowLongA(g_overlay, GWL_EXSTYLE);
+			if (g_menuOpen)
+				SetWindowLongA(g_overlay, GWL_EXSTYLE, exStyle & ~WS_EX_TRANSPARENT);
+			else
+				SetWindowLongA(g_overlay, GWL_EXSTYLE, exStyle | WS_EX_TRANSPARENT);
+		}
+		f1WasDown = f1Down;
+
+		static bool lmbWasDown = false;
+		bool lmbDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+		if (lmbDown && !lmbWasDown && g_menuOpen) {
+			POINT mp; GetCursorPos(&mp);
+			POINT origin = { 0, 0 }; ClientToScreen(g_overlay, &origin);
+			FullConfig fc;
+			{ std::lock_guard<std::mutex> lk(g_mtx); fc = g_fcfg; }
+			HandleMenuClick(mp.x - origin.x, mp.y - origin.y, true, fc);
+		}
+		lmbWasDown = lmbDown;
+
 		HWND gw = FindGameWindow();
 		if (gw && gw != g_gameWnd) g_gameWnd = gw;
 
@@ -645,16 +898,20 @@ int main(int argc, char* argv[])
 			int nh = gameRect.bottom - gameRect.top;
 			if (nw != sw || nh != sh || tl.x != topLeft.x || tl.y != topLeft.y) {
 				sw = nw; sh = nh; topLeft = tl;
-				MoveWindow(g_overlay, topLeft.x, topLeft.y, sw, sh, FALSE);
+				SetWindowPos(g_overlay, HWND_TOP, topLeft.x, topLeft.y, sw, sh, SWP_NOACTIVATE);
+			} else {
+				SetWindowPos(g_overlay, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 			}
 		}
 
 		GameData localGD;
 		ESPConfig localCfg;
+		FullConfig localFcfg;
 		{
 			std::lock_guard<std::mutex> lk(g_mtx);
 			localGD = g_gd;
 			localCfg = g_cfg;
+			localFcfg = g_fcfg;
 		}
 
 		HDC hdc = GetDC(g_overlay);
@@ -670,6 +927,7 @@ int main(int argc, char* argv[])
 		SelectObject(memDC, g_font);
 		RenderESP(memDC, sw, sh, localGD, localCfg);
 		RenderRadar(memDC, sw, sh, localGD, localCfg);
+		RenderMenu(memDC, sw, sh, localFcfg);
 
 		if (g_connected)
 			DrawText2(memDC, 5, sh - 20, "DMA ESP | Streamproof", RGB(0, 255, 100), g_fontSmall);
@@ -688,6 +946,8 @@ int main(int argc, char* argv[])
 
 	if (g_font) DeleteObject(g_font);
 	if (g_fontSmall) DeleteObject(g_fontSmall);
+	if (g_menuFont) DeleteObject(g_menuFont);
+	if (g_menuFontBold) DeleteObject(g_menuFontBold);
 	if (g_overlay) DestroyWindow(g_overlay);
 	UnregisterClassA("CoopyyESP", GetModuleHandle(NULL));
 	WSACleanup();
