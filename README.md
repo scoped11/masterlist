@@ -101,7 +101,7 @@ Index of every artifact across the project: mappers, drivers, BYOVD primitives, 
 
 | File | Description |
 |------|-------------|
-| `tools/dumper2.cpp` | **Game dumper** — engine detection, pattern scanning, **heuristic offset discovery** (string xref tracing, singleton pattern analysis, field offset enumeration). Supports R6/AnvilNext, UE5 (DF, AB), Unity/IL2CPP (Rust). Produces `_offsets.ini` automatically. |
+| `tools/dumper2.cpp` | **Game dumper** — engine detection, pattern scanning, **heuristic offset discovery** (string xref tracing, singleton pattern analysis, field offset enumeration), **JVM/HotSpot class analysis** (gHotSpotVMStructs walking, ClassLoaderDataGraph enumeration, field offset extraction for Java/libGDX games like Stalcraft). Supports R6/AnvilNext, UE5 (DF, AB), Unity/IL2CPP (Rust), Java/libGDX (Stalcraft). Produces `_offsets.ini` and `_jvm_classes.ini` automatically. |
 | `tools/dumper2.exe` | Built dumper2 binary |
 | `tools/dumper.cpp` | Original dumper (v1) |
 | `tools/dumper_dma.cpp` | DMA-based dumper |
@@ -153,6 +153,7 @@ All in `build_scripts/`:
 - **TRIXX works in VMware Workstation**: safe for testing
 - **DMA radar is multi-user**: `/radar` endpoint accessible to anyone on LAN; admin panel (`/`, `/menu`, `/api/set`) is localhost-only
 - **Dumper2 heuristic analysis**: replaces IDA dependency — scans raw PE dumps for manager strings, traces code xrefs to find singleton globals, discovers struct field offsets, extracts sig patterns. Works for R6 (AnvilNext), Delta Force/Arena Breakout (UE5), Rust (Unity/IL2CPP)
+- **Dumper2 JVM analysis**: for Java/libGDX games (Stalcraft/STALZONE) — reads `gHotSpotVMStructs` from jvm.dll for version-independent layout, walks ClassLoaderDataGraph to enumerate all loaded classes, extracts field offsets via ConstantPool resolution. Outputs per-class INI with DMA-ready offsets. Live mode only (needs running process)
 - **All AC testing is single-player/offline only**
 - **Never restart the host PC** — test in VMTEST VM
 - **NalDrvIntel is on MS Vulnerable Driver Blocklist** — mapper auto-disables the blocklist on startup
