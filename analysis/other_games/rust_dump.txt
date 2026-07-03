@@ -1,0 +1,145 @@
+Static Game Binary Dump
+Game: rust
+Path: C:\Program Files (x86)\Steam\steamapps\common\Rust
+Date: 2026-07-02 02:16:27
+
+=== PE Analysis: C:\Program Files (x86)\Steam\steamapps\common\Rust\GameAssembly.dll ===
+  Image Base:     0x180000000
+  Entry Point:    0x18084AC08 (RVA 0x84AC08)
+  Size of Image:  0xF465000 (250260 KB)
+  File Size:      253147136 bytes (241.4 MB)
+  Sections:       7
+  TimeDateStamp:  0x6A355A60
+  Characteristics: 0x2022 [DLL] [EXE]
+  Subsystem:      Windows GUI
+
+  Sections:
+  Name       VirtAddr     VirtSize     RawSize      RawPtr     Flags
+  .text      0x00001000   0x00883224   0x00883400   0x00000400 0x60000020 X R
+  il2cpp     0x00885000   0x0B846AAC   0x0B846C00   0x00883800 0x60000020 X R
+  .rdata     0x0C0CC000   0x01D77E04   0x01D78000   0x0C0CA400 0x40000040 R
+  .data      0x0DE44000   0x00BC2064   0x008CD800   0x0DE42400 0xC0000040 R W
+  .pdata     0x0EA07000   0x007B9144   0x007B9200   0x0E70FC00 0x40000040 R
+  .fptable   0x0F1C1000   0x00000100   0x00000200   0x0EEC8E00 0xC0000040 R W
+  .reloc     0x0F1C2000   0x002A2800   0x002A2800   0x0EEC9000 0x42000040 R
+
+  Imported DLLs:
+    KERNEL32.dll (160 functions)
+    USER32.dll (5 functions)
+    ADVAPI32.dll (12 functions)
+    ole32.dll (6 functions)
+    OLEAUT32.dll (10 functions)
+    SHELL32.dll (2 functions)
+    WS2_32.dll (37 functions)
+    IPHLPAPI.DLL (3 functions)
+    api-ms-win-core-winrt-error-l1-1-0.dll (2 functions)
+    api-ms-win-core-winrt-string-l1-1-0.dll (4 functions)
+    api-ms-win-core-winrt-l1-1-0.dll (1 functions)
+    api-ms-win-core-winrt-robuffer-l1-1-0.dll (1 functions)
+    bcrypt.dll (1 functions)
+    dbghelp.dll (2 functions)
+    baselib.dll (12 functions)
+  Total: 15 DLLs
+
+  === IL2CPP API Exports ===
+    0x00002F70  il2cpp_assembly_get_image
+    0x00814180  il2cpp_class_from_name
+    0x0082A0B0  il2cpp_class_get_fields
+    0x0082A300  il2cpp_class_get_methods
+    0x00003DB0  il2cpp_class_get_name
+    0x00004420  il2cpp_class_get_namespace
+    0x00006750  il2cpp_class_get_parent
+    0x0082ACB0  il2cpp_domain_get
+    0x0082ACD0  il2cpp_domain_get_assemblies
+    0x00002F70  il2cpp_field_get_name
+    0x007B9EC0  il2cpp_field_get_offset
+    0x0040C8F0  il2cpp_field_get_type
+    0x0082D130  il2cpp_image_get_class
+    0x000043A0  il2cpp_image_get_class_count
+    0x00004420  il2cpp_method_get_name
+    0x0082B950  il2cpp_method_get_param_count
+    0x00002F70  il2cpp_object_get_class
+    0x00829F70  il2cpp_resolve_icall
+    0x006F4CC0  il2cpp_string_chars
+    0x0082CEA0  il2cpp_type_get_name
+
+=== IL2CPP Metadata Dump ===
+  Version:       39
+  String table:  offset=0x15CA6D size=0xBA88
+  Images:        66
+  Types:         511838
+  Fields total:  2536
+  Methods total: 264
+
+  Assemblies:
+    [  0] <invalid>                                types: 199531
+    [  1] <invalid>                                types: 200829
+    [  2] <invalid>                                types: 202112
+    [  3] <invalid>                                types: 203465
+    [  4] <invalid>                                types: 204854
+    [  5] <invalid>                                types: 206337
+    [  6] <invalid>                                types: 207640
+    [  7] <invalid>                                types: 208961
+    [  8] <invalid>                                types: 210481
+    [  9] <invalid>                                types: 211580
+    [ 10] <invalid>                                types: 212883
+    [ 11] <invalid>                                types: 214194
+    [ 12] <invalid>                                types: 215525
+    [ 13] <invalid>                                types: 216847
+    [ 14] <invalid>                                types: 218259
+    [ 15] <invalid>                                types: 219574
+    [ 16] <invalid>                                types: 220911
+    [ 17] <invalid>                                types: 222267
+    [ 18] <invalid>                                types: 223050
+    [ 19] <invalid>                                types: 223518
+    [ 20] <invalid>                                types: 223741
+    [ 21] <invalid>                                types: 223984
+    [ 22] <invalid>                                types: 224168
+    [ 23] <invalid>                                types: 224313
+    [ 24] <invalid>                                types: 224424
+    [ 25] <invalid>                                types: 224793
+    [ 26] <invalid>                                types: 225172
+    [ 27] <invalid>                                types: 225292
+    [ 28] <invalid>                                types: 225444
+    [ 29] <invalid>                                types: 225634
+    [ 30] <invalid>                                types: 225865
+    [ 31] <invalid>                                types: 225935
+    [ 32] <invalid>                                types: 225991
+    [ 33] <invalid>                                types: 226042
+    [ 34] <invalid>                                types: 226123
+    [ 35] <invalid>                                types: 226199
+    [ 36] <invalid>                                types: 226276
+    [ 37] <invalid>                                types: 226348
+    [ 38] <invalid>                                types: 226468
+    [ 39] <invalid>                                types: 226605
+    [ 40] <invalid>                                types: 226714
+    [ 41] <invalid>                                types: 226881
+    [ 42] <invalid>                                types: 227015
+    [ 43] <invalid>                                types: 227147
+    [ 44] <invalid>                                types: 227253
+    [ 45] <invalid>                                types: 227404
+    [ 46] <invalid>                                types: 227823
+    [ 47] <invalid>                                types: 227903
+    [ 48] <invalid>                                types: 228053
+    [ 49] <invalid>                                types: 228185
+    [ 50] <invalid>                                types: 228312
+    [ 51] <invalid>                                types: 228413
+    [ 52] <invalid>                                types: 228513
+    [ 53] <invalid>                                types: 228658
+    [ 54] <invalid>                                types: 228939
+    [ 55] <invalid>                                types: 229069
+    [ 56] <invalid>                                types: 232456
+    [ 57] <invalid>                                types: 232563
+    [ 58] <invalid>                                types: 232685
+    [ 59] <invalid>                                types: 232767
+    [ 60] <invalid>                                types: 232916
+    [ 61] <invalid>                                types: 233116
+    [ 62] <invalid>                                types: 233324
+    [ 63] <invalid>                                types: 233395
+    [ 64] <invalid>                                types: 233667
+    [ 65] <invalid>                                types: 234245
+
+  === Game Classes (fields) ===
+
+  Dumped 0 classes
+

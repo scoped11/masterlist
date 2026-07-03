@@ -1,0 +1,299 @@
+================================================================================
+CTF Task 103: EAC (Easy Anti-Cheat) Driver Dump & Analysis Report
+================================================================================
+Date: 2026-06-29
+Target: EasyAntiCheat_EOS.sys v3.2.0 (Epic Online Services variant)
+Source: C:\Program Files (x86)\EasyAntiCheat_EOS\
+Game:   Apex Legends (ProductID: 5dcd88f4e2094a698ebffa43438edc33)
+================================================================================
+
+PART 1: DRIVER ACQUISITION
+================================================================================
+
+1.1 On-Disk Location
+  Driver:    C:\Program Files (x86)\EasyAntiCheat_EOS\EasyAntiCheat_EOS.sys
+  Service:   EasyAntiCheat_EOS (Windows service, starts on game launch)
+  User-mode: %APPDATA%\EasyAntiCheat\<ProductID>\<DeploymentID>\easyanticheat_x64.eac
+
+1.2 Dump Method Used
+  Static copy from disk while service is Stopped.
+  The .sys file is 37.33 MB and is NOT packed at rest (sections are readable).
+  The .eac user-mode module IS fully encrypted on disk (entropy 7.998/8.0).
+
+1.3 Alternative Dump Methods (if needed)
+  a) Disk copy when service stopped (used here — simplest)
+  b) sc query EasyAntiCheat_EOS → find ImagePath → copy .sys
+  c) Memory dump via BYOVD primitive if driver loaded (requires physical read
+     of loaded image base, walk PsLoadedModuleList for EasyAntiCheat entry)
+  d) Snapshot entire kernel memory via physical read + MmPfnDatabase walk
+  e) For .eac module: dump from game process memory after EAC decrypts it
+     (attach debugger before EAC initializes, or use BYOVD VirtRead)
+
+
+PART 2: PE STRUCTURE ANALYSIS
+================================================================================
+
+2.1 PE Header Summary
+  Format:       PE32+ (AMD64)
+  Subsystem:    Native/Driver (1)
+  ImageBase:    0x140000000
+  SizeOfImage:  0x25BF000 (37.75 MB)
+  EntryPoint:   0x17E150 (near end of .text)
+  Sections:     9
+  Static Imports: 2 (extremely minimal)
+  PDB:          Core.pdb (generic, minimal debug info)
+  Signature:    Valid Authenticode (EasyAntiCheat Oy, GlobalSign EV, expires Oct 2026)
+
+2.2 Section Layout
+  ┌──────────┬───────────┬──────────┬─────────┬─────────────────────────────────┐
+  │ Section  │ VA        │ Size     │ Entropy │ Purpose                         │
+  ├──────────┼───────────┼──────────┼─────────┼─────────────────────────────────┤
+  │ .text    │ 0x001000  │ 1525 KB  │ 5.949   │ Main driver code                │
+  │ .rdata   │ 0x17F000  │ 568 KB   │ 2.997   │ Read-only data, vtables         │
+  │ .data    │ 0x20D000  │ 472 KB   │ 6.771   │ Global variables (45KB raw)     │
+  │ (anon)   │ 0x284000  │ 25 KB    │ 0.000   │ Zeroed padding / reserved       │
+  │ .rsrc    │ 0x28B000  │ 0.8 KB   │ 2.750   │ Version info resource           │
+  │ .reloc   │ 0x28C000  │ 2.4 KB   │ 5.286   │ Base relocations (minimal)      │
+  │ (anon)   │ 0x28D000  │ 10 KB    │ 6.334   │ Unpacking/initialization stub   │
+  │ (anon)   │ 0x290000  │ 35980 KB │ 5.549   │ VM-PROTECTED CODE (Themida/VMProtect) │
+  │ .pdata   │ 0x25B3000 │ 48 KB    │ 6.437   │ Exception unwind data           │
+  └──────────┴───────────┴──────────┴─────────┴─────────────────────────────────┘
+
+  KEY INSIGHT: The 36 MB unnamed section (0x290000) at entropy 5.549 is
+  VM-protected/obfuscated code — NOT encrypted (encrypted would be ~7.5+).
+  This is where the bulk of EAC's detection logic lives, wrapped in a
+  code virtualizer to resist reverse engineering.
+
+2.3 Import Table (Static)
+  Only TWO static imports — everything else resolved dynamically at runtime:
+
+  FLTMGR.SYS:
+    - FltRegisterFilter  → EAC registers as a MiniFilter driver
+
+  ntoskrnl.exe:
+    - __chkstk           → Stack overflow checking (compiler intrinsic)
+
+  This extreme minimalism means EAC uses MmGetSystemRoutineAddress or manual
+  PE parsing to find all kernel APIs at runtime. This defeats static import
+  analysis and makes IDA cross-references incomplete without runtime tracing.
+
+
+PART 3: DETECTION MECHANISMS IDENTIFIED
+================================================================================
+
+3.1 Driver Blocklist (CONFIRMED BY LOGS)
+  EAC maintains a blocklist of known vulnerable drivers. When a blocklisted
+  driver is loaded, EAC refuses to start the game (error code 206).
+
+  CONFIRMED BLOCKED:
+    - NalDrvIntel.sys  (Intel NAL driver — our old BYOVD)
+    - WdBroker.sys     (Windows Defender Broker — previous BYOVD)
+
+  NOT BLOCKED (game launched successfully with these loaded):
+    - SIVX64.sys        (SIV system info driver)
+    - ThrottleStop.sys  (CPU throttle control)
+    - TRIXX.sys         (Sapphire GPU utility — CURRENT BYOVD)
+
+  Evidence from launcher logs:
+    16:03 → "Please unload NalDrvIntel.sys before starting the game" (206)
+    16:25 → "Please unload WdBroker.sys before starting the game" (206)
+    21:09 → "Easy Anti-Cheat successfully loaded in-game" (301) ← after switch
+
+  The blocklist is likely downloaded from the EAC CDN:
+    https://modules-cdn.eac-prod.on.epicgames.com/modules/<ProductID>/<DeploymentID>/win64
+
+3.2 MiniFilter (Filesystem Monitoring)
+  EAC registers a MiniFilter via FltRegisterFilter. This intercepts:
+    - File creation/opening (IRP_MJ_CREATE)
+    - File reads/writes (IRP_MJ_READ/WRITE)
+    - Directory queries
+
+  Likely monitors:
+    - Game executable integrity (r5apex_dx12.exe)
+    - DLL loads from suspicious paths
+    - Cheat configuration files
+    - Memory-mapped file modifications
+
+3.3 Certificate / Signature Verification
+  Unicode strings reveal WinTrust-based driver verification:
+    - WINTRUST_ACTION_GENERIC_VERIFY_V2 (GUID: 00AAC56B-CD44-11D0-8CC2-...)
+    - DRIVER_ACTION_VERIFY (GUID: F750E6C3-38EE-11D1-85E5-...)
+    - Reads: SOFTWARE\Microsoft\SystemCertificates\%s\Certificates\
+    - Policy chain: DriverInitializePolicy → DriverFinalPolicy → DriverCleanupPolicy
+
+  EAC verifies Authenticode signatures of loaded kernel drivers. Drivers that:
+    a) Are revoked (certificate on CRL)
+    b) Are on the vulnerable driver blocklist
+    c) Have expired or invalid signatures
+  ...will trigger detection.
+
+  OUR TRIXX.sys: DigiCert EV signed, valid certificate, NOT on blocklist = PASSES
+
+3.4 Kernel Callbacks (Inferred from our counter-measures)
+  Based on our BetestDriver.c counter-measures, EAC registers:
+    - PsSetCreateProcessNotifyRoutine — monitors process creation
+    - PsSetCreateThreadNotifyRoutine — monitors thread creation
+    - PsSetLoadImageNotifyRoutine — monitors DLL/driver loading
+    - ObRegisterCallbacks — monitors handle operations (open process/thread)
+    - CmRegisterCallback — monitors registry access
+    - Possible: PsSetCreateProcessNotifyRoutineEx2 (extended version)
+
+3.5 Memory Scanning
+  EAC's user-mode module (easyanticheat_x64.eac) performs:
+    - Signature scanning of game memory for known cheat patterns
+    - Stack walking to detect injected code
+    - Module enumeration (NtQueryVirtualMemory/VirtualQuery)
+    - Thread enumeration for suspicious threads
+    - Handle table auditing
+    - Working set analysis (NtQueryInformationProcess)
+
+3.6 Anti-Dump / Self-Protection
+  - User-mode module (.eac) is fully encrypted on disk (entropy 7.998)
+  - Kernel driver uses code virtualization (36MB VM-protected section)
+  - Only 2 static imports — dynamic resolution of all APIs
+  - PDB path is generic ("Core.pdb") — minimal debug symbols
+  - Anti-debug checks via various NtQuery* calls
+  - Timing checks to detect single-stepping / breakpoints
+
+3.7 ETW / Telemetry
+  EAC likely uses ETW (Event Tracing for Windows) for reporting:
+    - Our driver has ETW patching to suppress AC telemetry
+    - EtwRegister trampoline hooks referenced in BetestDriver.c
+    - Reports sent to Epic/EAC backend for server-side analysis
+
+
+PART 4: COMMUNICATION PROTOCOL
+================================================================================
+
+4.1 Service Communication
+  Device path: \\.\EasyAntiCheat_EOS\ (from Unicode strings)
+  The EAC service (EasyAntiCheat_EOS.exe) communicates with the driver via
+  DeviceIoControl. Specific IOCTL codes are in the VM-protected section
+  and cannot be statically extracted.
+
+4.2 CDN / Network Communication
+  Module updates: modules-cdn.eac-prod.on.epicgames.com
+  Uses HTTP 304 (Not Modified) caching — checks for updates on each launch
+  Module metadata includes SHA1 hash for integrity verification:
+    sha1=6e3fb53e2e029d991f192ccecf0a0ac5a081e2ee (current)
+
+4.3 Game ↔ EAC Communication
+  The .eac module is loaded into the game process (r5apex_dx12.exe).
+  It communicates with the kernel driver via a private IOCTL channel.
+  Detection reports are sent from user-mode → kernel → EAC backend.
+
+
+PART 5: EXTERNAL CHEAT DESIGN GUIDELINES
+================================================================================
+
+Based on this analysis, here's what to AVOID and what's SAFE for external cheats:
+
+5.1 THINGS TO AVOID
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │ DETECTION VECTOR        │ RISK  │ WHY                             │
+  ├─────────────────────────┼───────┼─────────────────────────────────┤
+  │ Blocklisted BYOVD       │ FATAL │ EAC checks at launch, game     │
+  │ (NalDrv, WdBroker)      │       │ won't start                    │
+  ├─────────────────────────┼───────┼─────────────────────────────────┤
+  │ OpenProcess on game PID │ HIGH  │ ObRegisterCallbacks monitors   │
+  │ with PROCESS_VM_*       │       │ handle access                  │
+  ├─────────────────────────┼───────┼─────────────────────────────────┤
+  │ ReadProcessMemory       │ HIGH  │ Detected via handle access +   │
+  │ WriteProcessMemory      │       │ EAC kernel monitoring          │
+  ├─────────────────────────┼───────┼─────────────────────────────────┤
+  │ CreateRemoteThread      │ HIGH  │ Thread creation notify +       │
+  │ (DLL injection)         │       │ image load callbacks           │
+  ├─────────────────────────┼───────┼─────────────────────────────────┤
+  │ Unsigned/test-signed    │ HIGH  │ Authenticode verification      │
+  │ kernel drivers          │       │ will flag it                   │
+  ├─────────────────────────┼───────┼─────────────────────────────────┤
+  │ Known cheat signatures  │ MED   │ Memory signature scanning      │
+  │ in game process         │       │ by user-mode module            │
+  ├─────────────────────────┼───────┼─────────────────────────────────┤
+  │ Suspicious file paths   │ MED   │ MiniFilter monitors file ops   │
+  │ or cheat-named DLLs     │       │ near game directory            │
+  ├─────────────────────────┼───────┼─────────────────────────────────┤
+  │ Registry residue        │ LOW   │ CmRegisterCallback monitors    │
+  │ (service keys left)     │       │ registry writes                │
+  └─────────────────────────┴───────┴─────────────────────────────────┘
+
+5.2 SAFE APPROACHES FOR EXTERNAL CHEATS
+  a) Use non-blocklisted BYOVD driver (TRIXX.sys — confirmed safe)
+  b) Read game memory via physical memory (BYOVD), NOT via handles
+  c) Never call OpenProcess/ReadProcessMemory on the game
+  d) Clean up all service registry keys after BYOVD use (our mapper does this)
+  e) Strip OB callbacks before opening any game handles
+  f) External overlay via DWM/DirectX — never inject into game process
+  g) Read-only approach: only read offsets, never write game memory
+  h) Use DKOM to hide BYOVD driver from PsLoadedModuleList
+  i) Timestamp randomization to defeat timing-based detection
+
+5.3 OUR CURRENT STEALTH MEASURES (Already Implemented)
+  From mapper_nal.cpp and BetestDriver.c:
+
+  ✓ BYOVD with non-blocklisted driver (TRIXX.sys)
+  ✓ DKOM: unlink from PsLoadedModuleList
+  ✓ PE header zeroing (stealth)
+  ✓ Trampoline zeroing
+  ✓ BYOVD cleanup: service deletion + registry cleanup
+  ✓ Pre-emptive callback stripping (all ACs)
+  ✓ VGK neutralize
+  ✓ Inline hook callback removal
+  ✓ Unified AC neutralize with 5s re-scan
+  ✓ Anti-debug / anti-attach
+  ✓ Driver mutation (anti-signature)
+  ✓ PatchGuard safety (DPC/timer cleanup + PE checksum zero)
+  ✓ EAC-specific improvements:
+    - OB Callback neutralization (EAC_IMP_OB_CALLBACKS)
+    - Report hook suppression (EAC_IMP_REPORT_HOOKS)
+    - CR3 shuffling (EAC_IMP_CR3_SHUFFLE)
+    - Handle table scrubbing (EAC_IMP_HANDLE_SCRUB)
+    - Memory scan evasion (EAC_IMP_MEM_EVASION)
+    - Early load timing (EAC_IMP_EARLY_LOAD)
+
+
+PART 6: STEALTH TECHNIQUE RECOMMENDATIONS
+================================================================================
+
+6.1 Pre-Game Launch (Before EAC Starts)
+  1. Load TRIXX.sys BYOVD (not on blocklist)
+  2. Map Betest driver via TRIXX physical R/W
+  3. Immediately cleanup: delete TrixxSvc service + registry keys
+  4. Betest remains in memory with no service/registry traces
+  5. Strip all kernel callbacks (OB, process, thread, image load)
+  6. Enable EAC improvements (--eac 3F): OB + reports + CR3 + handles + mem
+
+6.2 During Gameplay (External Cheat Active)
+  1. Read memory ONLY via physical memory (BYOVD or mapped driver)
+  2. Never open game process handles via Win32 API
+  3. Use external overlay (DirectX/GDI) — never inject into game
+  4. Randomize read patterns (avoid predictable scan intervals)
+  5. Handle EAC's periodic re-scans (our 5s re-scan neutralize handles this)
+  6. Monitor for EAC module updates (CDN checks on each launch)
+
+6.3 Post-Game (Cleanup)
+  1. Remove all service entries (already done by --no-cleanup=false)
+  2. Clear event logs if any driver load events were recorded
+  3. Ensure no .sys files remain in predictable paths
+  4. Betest driver self-destructs on unload (if implemented)
+
+6.4 Advanced Techniques (Future Work)
+  - Hypervisor-based memory cloaking (EPT shadowing)
+  - CR3 rotation (switch page tables to hide mapped memory)
+  - PTE manipulation (remap pages to avoid physical scan)
+  - Thread pool worker hijacking (avoid creating new threads)
+  - Syscall hooking at LSTAR level (intercept NtQuery* from EAC)
+
+
+PART 7: FILES PRODUCED
+================================================================================
+
+  build/EasyAntiCheat_EOS.sys         — Dumped EAC kernel driver (37.33 MB)
+  build/easyanticheat_x64.eac         — Dumped EAC user-mode module (29.67 MB, encrypted)
+  build/eac_strings.txt               — ASCII strings from driver
+  build/eac_wstrings.txt              — Unicode strings from driver
+  build/CTF_103_EAC_Analysis.txt      — This report
+
+================================================================================
+END OF REPORT
+================================================================================

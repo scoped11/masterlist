@@ -1,0 +1,98 @@
+Static Game Binary Dump
+Game: apex
+Path: C:\Program Files (x86)\Steam\steamapps\common\Apex Legends
+Date: 2026-07-02 02:16:29
+
+=== PE Analysis: C:\Program Files (x86)\Steam\steamapps\common\Apex Legends\r5apex_dx12.exe ===
+  Image Base:     0x140000000
+  Entry Point:    0x1414078D8 (RVA 0x14078D8)
+  Size of Image:  0xE4A6000 (234136 KB)
+  File Size:      43191648 bytes (41.2 MB)
+  Sections:       8
+  TimeDateStamp:  0x6A3C7991
+  Characteristics: 0x22 [EXE]
+  Subsystem:      Windows GUI
+
+  Sections:
+  Name       VirtAddr     VirtSize     RawSize      RawPtr     Flags
+  .text      0x00001000   0x014B6000   0x014B6000   0x00000400 0x60000020 X R
+  .rdata     0x014B7000   0x00694000   0x00694000   0x014B6400 0x40000040 R
+  .data      0x01B4B000   0x0C819000   0x00CA3A00   0x01B4A400 0xC0000040 R W
+  .pdata     0x0E364000   0x000E4000   0x000E4000   0x027EDE00 0x40000040 R
+  _RDATA     0x0E448000   0x00001000   0x00001000   0x028D1E00 0x40000040 R
+  .fptable   0x0E449000   0x00001000   0x00001000   0x028D2E00 0xC0000040 R W
+  .rsrc      0x0E44A000   0x00004000   0x00003400   0x028D3E00 0x40000040 R
+  .reloc     0x0E44E000   0x00058000   0x00057200   0x028D7200 0x42000040 R
+
+  Imported DLLs:
+    r5apex_dx12preloader.dll (1 functions)
+  Total: 1 DLLs
+
+  Exports (r5apex_dx12.exe) — 37 functions, 18 names:
+    [  20] 0x01B865D0  AmdPowerXpressRequestHighPerformance
+    [  21] 0x0121B7A0  GetDenuvoTicketLocation
+    [  22] 0x0121B7C0  GetDenuvoTimeTicketRequest
+    [  23] 0x01272F60  ffxFsr2ContextCreate
+    [  24] 0x01272FF0  ffxFsr2ContextDestroy
+    [  25] 0x01273000  ffxFsr2ContextDispatch
+    [  26] 0x01273050  ffxFsr2ContextGenerateReactiveMask
+    [  27] 0x0126F940  ffxFsr2GetInterfaceDX12
+    [  28] 0x012732C0  ffxFsr2GetJitterOffset
+    [  29] 0x01273350  ffxFsr2GetJitterPhaseCount
+    [  30] 0x01273390  ffxFsr2GetRenderResolutionFromQualityMode
+    [  31] 0x0126FA40  ffxFsr2GetScratchMemorySizeDX12
+    [  32] 0x01273420  ffxFsr2GetUpscaleRatioFromQualityMode
+    [  33] 0x01273460  ffxFsr2ResourceIsNull
+    [  34] 0x00239D20  ffxGetCommandListDX12
+    [  35] 0x0126FA50  ffxGetDX12ResourcePtr
+    [  36] 0x00239D20  ffxGetDeviceDX12
+    [  37] 0x0126FA70  ffxGetResourceDX12
+
+  Pattern scan in section .text (VA 0x140001000, size 0x14B6000):
+    EntityList                NOT FOUND (pattern may be outdated)
+    LocalPlayer               NOT FOUND (pattern may be outdated)
+    ViewRender                NOT FOUND (pattern may be outdated)
+    ViewMatrix                NOT FOUND (pattern may be outdated)
+    GlowEnable                NOT FOUND (pattern may be outdated)
+    NameList                  NOT FOUND (pattern may be outdated)
+    NetworkVar_table          NOT FOUND (pattern may be outdated)
+    LevelName                 NOT FOUND (pattern may be outdated)
+  Result: 0/8 patterns matched
+
+=== PE Analysis: C:\Program Files (x86)\Steam\steamapps\common\Apex Legends\r5apex_dx12runtime.dll ===
+  Image Base:     0x200000000
+  Entry Point:    0x2004C9DE0 (RVA 0x4C9DE0)
+  Size of Image:  0x37E2000 (57224 KB)
+  File Size:      58586464 bytes (55.9 MB)
+  Sections:       11
+  TimeDateStamp:  0x9D287B22
+  Characteristics: 0x22 [EXE]
+  Subsystem:      Windows GUI
+
+  Sections:
+  Name       VirtAddr     VirtSize     RawSize      RawPtr     Flags
+  .rdata     0x00001000   0x00001088   0x00001200   0x00000400 0x40000040 R
+  .rwx       0x00003000   0x00001000   0x00001000   0x00001600 0xE0000060 X R W
+  packer0    0x00004000   0x003C34C8   0x003C3600   0x00002600 0x40000040 R
+  packer1    0x003C8000   0x00183E34   0x00184000   0x003C5C00 0x60000060 X R
+  packer2    0x0054C000   0x00009644   0x00009200   0x00549C00 0xC0000040 R W
+  .rsrc      0x00556000   0x0024FD88   0x0024FE00   0x00552E00 0x40000040 R
+  .reloc     0x007A6000   0x000008A0   0x00000A00   0x007A2C00 0x42000040 R
+  packer30   0x007A7000   0x00219FDF   0x0021A000   0x007A3600 0x60000060 X R
+  packer40   0x009C1000   0x000741C0   0x00074200   0x009BD600 0xC0000040 R W
+  packer31   0x00A36000   0x02D528B8   0x02D52A00   0x00A31800 0x60000060 X R
+  packer42   0x03789000   0x00058950   0x00058A00   0x03784200 0xC0000040 R W
+
+  Exports: none
+
+  Pattern scan in section .rwx (VA 0x200003000, size 0x1000):
+    EntityList                NOT FOUND (pattern may be outdated)
+    LocalPlayer               NOT FOUND (pattern may be outdated)
+    ViewRender                NOT FOUND (pattern may be outdated)
+    ViewMatrix                NOT FOUND (pattern may be outdated)
+    GlowEnable                NOT FOUND (pattern may be outdated)
+    NameList                  NOT FOUND (pattern may be outdated)
+    NetworkVar_table          NOT FOUND (pattern may be outdated)
+    LevelName                 NOT FOUND (pattern may be outdated)
+  Result: 0/8 patterns matched
+

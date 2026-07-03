@@ -1,0 +1,385 @@
+================================================================================
+CTF Task 103 Part 2: EAC Driver Deep Analysis Report
+================================================================================
+Date:    2026-06-30
+Target:  EasyAntiCheat_EOS.sys v3.2.0 (Epic Online Services variant)
+Tool:    IDA Professional 9.4 + Hex-Rays Decompiler (IDAPython scripted)
+PDB:     Core.pdb (not available — analysis is symbol-free)
+================================================================================
+
+
+PART 1: DRIVER ARCHITECTURE OVERVIEW
+================================================================================
+
+1.1 Segment Layout (IDA Confirmed)
+  Segment    VA Range                        Size       Perms  Purpose
+  ─────────────────────────────────────────────────────────────────────────────
+  .text      0x140001000 - 0x14017F000      1528 KB    R-X    Main driver code
+  .idata     0x14017F000 - 0x14017F020         0 KB    R--    Import directory
+  .rdata     0x14017F020 - 0x14020D000       567 KB    R--    Read-only data
+  .data      0x14020D000 - 0x140284000       476 KB    RW-    Global variables
+  seg004     0x140284000 - 0x14028B000        28 KB    R--    Zeroed/reserved
+  seg005     0x14028D000 - 0x140290000        12 KB    R-X    VM config/trampoline
+  seg006     0x140290000 - 0x1425B3000     35980 KB    R-X    VM-PROTECTED CODE
+  .pdata     0x1425B3000 - 0x1425BF000        48 KB    R--    Exception unwind
+
+1.2 Function Statistics
+  Total functions identified by IDA: 2,777
+    .text section:     1,625 functions (non-VM-protected, analyzable)
+    VM section:        1,152 functions (VM-protected, obfuscated)
+    Other:                 0
+
+  The VM section contains 41.5% of all functions despite being 95% of
+  the executable's size. IDA can identify function boundaries in the VM
+  section because the VM uses a structured entry/exit pattern (see Part 3).
+
+1.3 Cross-References: .text → VM Section
+  Total calls/jumps from .text into VM section: 200
+
+  This means 200 unique code paths transition from analyzable .text code
+  into VM-protected handlers. Each .text function that calls VM code acts
+  as a "gateway" — the actual logic is inside the VM section.
+
+  Sample gateway pattern:
+    sub_140010A00 (.text) → sub_1402BFB09 (VM)
+    sub_140010F40 (.text) → sub_1403046EC (VM)
+    sub_1400145C0 (.text) → sub_140304593 (VM)
+    sub_14001F500 (.text) → sub_140292634 (VM)
+
+  These gateways are spread across the entire .text section, indicating
+  that critical logic throughout the driver (not just one subsystem)
+  is VM-protected.
+
+
+PART 2: DRIVER ENTRY & INITIALIZATION
+================================================================================
+
+2.1 DriverEntry (0x14017E150)
+  Decompiled via Hex-Rays:
+
+  NTSTATUS __stdcall DriverEntry(PDRIVER_OBJECT DriverObject,
+                                  PUNICODE_STRING RegistryPath)
+  {
+      sub_14017E17C();                            // __security_init_cookie
+      return sub_1400A5C00(DriverObject, RegistryPath);  // real init
+  }
+
+  DriverEntry is minimal: initialize security cookie, then call real init.
+
+2.2 Security Cookie Init (0x14017E17C)
+  Standard MSVC __security_init_cookie implementation:
+
+  uintptr_t sub_14017E17C()
+  {
+      if (_security_cookie == 0 || _security_cookie == 0x2B992DDFA232LL)
+          __fastfail(6u);          // FAST_FAIL_GS_COOKIE_INIT
+      qword_14020D038 = ~_security_cookie;
+      return ~_security_cookie;
+  }
+
+  This is NOT custom EAC security — it's the standard /GS buffer overflow
+  protection. The actual anti-tamper is in the VM section.
+
+2.3 Real Init (sub_1400A5C00)
+  This function is the true driver initialization entry. It's a thunk
+  that calls deeper into .text, eventually reaching VM-protected code
+  for the actual driver setup (MiniFilter registration, callback setup,
+  IOCTL dispatch table, etc.).
+
+  Init call chain:
+    DriverEntry → sub_14017E17C (cookie)
+                → sub_1400A5C00 (thunk)
+                  → sub_140089770 (real init with VM calls)
+                    → sub_140020000 (deep init, sets magic 0xC1252754408765E1)
+                    → jmp rax (VM dispatcher)
+
+
+PART 3: VM PROTECTION ANALYSIS
+================================================================================
+
+3.1 VM Architecture
+  EAC uses a register-based virtual machine for code protection.
+  The VM follows a structured entry/exit pattern:
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ .text function calls VM target                                 │
+  │   ↓                                                            │
+  │ VM ENTRY STUB (saves all registers + XMM to stack frame)       │
+  │   ↓                                                            │
+  │ DISPATCH (return-address manipulation computes target handler)  │
+  │   ↓                                                            │
+  │ VM HANDLER (obfuscated instruction implementation)              │
+  │   ↓                                                            │
+  │ VM EXIT STUB (restores all registers + XMM from stack frame)   │
+  │   ↓                                                            │
+  │ Return to caller                                               │
+  └─────────────────────────────────────────────────────────────────┘
+
+3.2 VM Entry Stub (0x140290000)
+  The first VM function is a context-save routine that preserves ALL
+  CPU state before entering the VM interpreter:
+
+  Saved registers: RAX, RBX, RCX, RDX, R8, R10, R11, R13, RSI, RBP
+  Saved XMM:       XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM7,
+                   XMM10, XMM12, XMM13
+
+  This creates a large stack frame (~0x1C0+ bytes) that serves as
+  the VM's register file / context area.
+
+3.3 VM Dispatch Mechanism (0x14029010B)
+  The dispatch uses return-address manipulation:
+
+    push    rax
+    push    rbx
+    mov     rax, 0FFFFFFFFFFD6914Dh    ; negative offset constant
+    mov     rbx, [rsp+10h]             ; get return address
+    lea     rbx, [rbx+rax]             ; compute target = ret + offset
+    mov     [rsp+10h+arg_158], rbx     ; store computed target
+    pop     rbx
+    pop     rax
+    retn                               ; jump to computed address
+
+  Each VM handler has a UNIQUE offset constant. The dispatch computes:
+    target = return_address + unique_offset
+
+  This makes static analysis very difficult because:
+  a) No jump table to enumerate handlers
+  b) Each call site has a different dispatch constant
+  c) The offsets change per-build (polymorphic)
+  d) The return address itself is obfuscated via call chains
+
+3.4 VM Exit Stub (0x140290128)
+  Mirror image of entry — restores all registers and XMM from the stack
+  frame, then returns to the original caller.
+
+3.5 Multiple Entry Points
+  The VM section contains MULTIPLE copies of entry/exit stubs:
+    0x140290000 - Entry stub #1 (size 0x10B)
+    0x1402904FA - Entry stub #2 (size 0x10B, identical pattern)
+    ...
+
+  Each pair has its own dispatch constant:
+    Stub #1: offset = 0xFFFFFFFFFFD6914D
+    Stub #2: offset = 0xFFFFFFFFFFD68C53
+
+  This confirms there are many independent VM entry points, each
+  routing to different handler chains. The VM is NOT a single
+  monolithic interpreter — it's distributed across the section.
+
+
+PART 4: API RESOLUTION (FULLY HIDDEN)
+================================================================================
+
+4.1 String Analysis Results
+  Searched for 46 common kernel API names as plaintext strings.
+  Results: ZERO API name strings found in ANY section.
+
+  Searched APIs (all NOT FOUND):
+    MmGetSystemRoutineAddress, ObRegisterCallbacks,
+    PsSetCreateProcessNotifyRoutine, PsSetLoadImageNotifyRoutine,
+    PsSetCreateThreadNotifyRoutine, ZwQuerySystemInformation,
+    NtQuerySystemInformation, MmCopyVirtualMemory,
+    KeStackAttachProcess, PsLookupProcessByProcessId,
+    IoCreateDevice, IoCreateSymbolicLink, RtlInitUnicodeString,
+    ExAllocatePool, MmMapIoSpace, ZwOpenKey, ZwQueryValueKey,
+    PsGetCurrentProcess, ZwQueryDirectoryFile, MmGetPhysicalAddress,
+    ZwCreateFile, NtReadVirtualMemory, MmProbeAndLockPages,
+    KeAttachProcess, ObOpenObjectByPointer, NtClose,
+    PsGetProcessPeb, PsGetProcessImageFileName,
+    IoGetCurrentProcess, MmIsAddressValid,
+    ExAllocatePoolWithTag, KeInitializeApc, KeInsertQueueApc,
+    PsGetProcessWow64Process, ZwOpenProcess, ZwOpenThread,
+    FltStartFiltering, CmRegisterCallbackEx, CmUnRegisterCallback,
+    ExRegisterCallback, IoRegisterFsRegistrationChange,
+    PsRemoveCreateThreadNotifyRoutine,
+    PsRemoveLoadImageNotifyRoutine, ObUnRegisterCallbacks
+
+  Only "FltRegisterFilter" was found — because it's an IMPORT name,
+  not an API resolution string.
+
+4.2 Implications
+  EAC resolves ALL kernel APIs through one of these mechanisms:
+  a) Encrypted string tables inside the VM section, decrypted at runtime
+  b) Hash-based lookup (hash of API name → walk export table)
+  c) Ordinal-based resolution (no string needed)
+  d) Manual PE export parsing of ntoskrnl.exe in memory
+
+  Method (b) is most likely — hash-based import resolution is the
+  standard technique for VM-protected drivers. The hash function
+  and lookup logic live entirely inside the VM section.
+
+4.3 .rdata String Analysis
+  ZERO interesting strings found in .rdata section.
+  All security-relevant strings (device names, paths, API names)
+  are either inside the VM section or encrypted in .data.
+
+  The only readable strings are the certificate-related ones in the
+  PE version info resource and the import table entries.
+
+
+PART 5: MINIFILTER REGISTRATION
+================================================================================
+
+5.1 FltRegisterFilter Call Site
+  IAT entry: 0x14017F000
+  Called from: 0x14017E1BC (near end of .text, close to DriverEntry)
+
+  This is the ONLY static import call in the entire driver.
+  FltRegisterFilter requires a FLT_REGISTRATION structure that defines:
+    - IRP dispatch callbacks (pre/post operations)
+    - Unload routine
+    - Instance setup/teardown
+    - Context definitions
+
+  The FLT_REGISTRATION structure is likely built at runtime inside
+  the VM section, making it impossible to statically identify which
+  IRP operations EAC monitors.
+
+5.2 Inferred MiniFilter Operations
+  Based on typical AC driver behavior and our testing:
+    - IRP_MJ_CREATE (file open monitoring)
+    - IRP_MJ_READ/WRITE (file integrity checking)
+    - IRP_MJ_SET_INFORMATION (rename/delete detection)
+    - IRP_MJ_DIRECTORY_CONTROL (directory enumeration hooking)
+    - IRP_MJ_ACQUIRE_FOR_SECTION_SYNC (memory-mapped file monitoring)
+
+
+PART 6: .DATA SECTION ANALYSIS
+================================================================================
+
+6.1 Function Pointer Census (first 128KB of .data)
+  Total code pointers:     158
+  Pointers to .text:        42
+  Pointers to VM section:    0
+
+  CRITICAL FINDING: Zero .data pointers to the VM section.
+  This means:
+  a) The VM dispatch table is NOT in .data
+  b) VM entry is always via computed jumps (return-address manipulation)
+  c) There is no "handler table" to patch for VM bypass
+
+6.2 .text Pointers in .data
+  42 function pointers from .data into .text. These are likely:
+  - Vtable entries
+  - Callback registrations
+  - CFG (Control Flow Guard) dispatch table entries
+
+  CFG-related entries observed in .rdata (near .data boundary):
+  - __guard_check_icall_fptr
+  - __guard_dispatch_icall_fptr
+  - __guard_cfg_check_icall_fptr
+  - __guard_cfg_dispatch_icall_fptr
+  - __guard_cfg_table_dispatch_icall_fptr
+  - __castguard_check_failure_os_handled_fptr
+
+  EAC uses Windows CFG (Control Flow Guard) for additional integrity.
+
+6.3 seg005 Stub Section (0x14028D000 - 0x140290000)
+  12KB section marked R-X but IDA found ZERO functions in it.
+  This section likely contains:
+  - Encrypted/compressed initialization data
+  - VM bytecode tables
+  - Runtime configuration for the VM interpreter
+  - Not directly executable code (despite R-X permissions)
+
+
+PART 7: TOP FUNCTIONS & COMPLEXITY
+================================================================================
+
+7.1 Largest Functions (by size)
+  Rank  Address        Size     Section   Notes
+  ─────────────────────────────────────────────────────
+  1     0x140E2D48A    24 KB    VM        Largest VM handler
+  2     0x14179FB06    15 KB    VM
+  3     0x14109ABA0    15 KB    VM
+  4     0x1420ADA35    14 KB    VM
+  5     0x14050F237    14 KB    VM
+  6-9   (various)      14 KB    VM
+  10    0x140149E80    14 KB    .text     LARGEST .TEXT FUNCTION
+  11-20 (various)      12-13KB  VM
+
+  19 of the top 20 largest functions are in the VM section.
+  Only ONE .text function (sub_140149E80, 14KB) made the top 20.
+
+  sub_140149E80 is likely the most complex non-VM-protected function
+  and is a high-priority target for reverse engineering. It may be:
+  - The main IOCTL dispatch handler
+  - A complex data processing/parsing function
+  - The MiniFilter callback multiplexer
+
+
+PART 8: IMPLICATIONS FOR EXTERNAL CHEAT DESIGN
+================================================================================
+
+8.1 What This Means for Us
+  The deep analysis confirms that EAC's kernel driver is heavily
+  fortified against static analysis:
+
+  a) 100% of API resolution is inside VM-protected code
+  b) No readable API strings, no dispatch table, no handler table
+  c) VM dispatch uses computed jumps with per-stub unique constants
+  d) 1,152 functions are VM-protected (41.5% of total)
+  e) CFG enforcement adds another layer of integrity checking
+
+8.2 Attack Surfaces (What IS Analyzable)
+  Despite heavy protection, these remain accessible:
+
+  a) 1,625 .text functions are fully decompilable by Hex-Rays
+  b) The 200 gateway functions show WHERE VM-protected logic is invoked
+  c) FltRegisterFilter call site reveals MiniFilter setup location
+  d) .data has 42 function pointers that can be monitored/hooked
+  e) .pdata (exception unwind) reveals function boundaries in VM section
+  f) Runtime analysis via BYOVD can intercept API calls as they happen
+
+8.3 Recommended External Cheat Strategy
+  Based on this deep analysis:
+
+  1. PHYSICAL MEMORY ONLY: Never use handles or API calls to access
+     the game process. EAC monitors all of these via VM-protected
+     ObRegisterCallbacks and similar hooks.
+
+  2. PRE-EAC LOADING: Load our BYOVD driver + mapped driver BEFORE
+     EAC starts. Our callback stripping runs before EAC registers
+     its callbacks, preventing it from monitoring us.
+
+  3. NO INJECTION: The MiniFilter + image load callbacks make any
+     form of DLL injection extremely risky. External overlay only.
+
+  4. DRIVER HYGIENE: Clean all service entries, zero PE headers,
+     unlink from PsLoadedModuleList. EAC's VM code likely walks
+     the module list and checks loaded driver signatures.
+
+  5. TIMING: Avoid predictable read patterns. EAC may profile
+     physical memory access patterns via performance counters
+     or DPC timing measurements (inside VM-protected code).
+
+  6. BYOVD SELECTION: Keep using TRIXX.sys — it's not on the
+     blocklist. Monitor EAC updates for blocklist additions.
+     The blocklist is likely downloaded from the CDN at:
+     modules-cdn.eac-prod.on.epicgames.com
+
+8.4 What Can't Be Done Statically
+  The following require RUNTIME analysis (debugging in VM):
+  - Exact IOCTL codes used for game↔driver communication
+  - Specific memory scan signatures EAC uses
+  - Blocklist hash algorithm and entries
+  - ObRegisterCallbacks handler logic
+  - Process/thread notification callback behavior
+  - ETW telemetry payload format
+
+
+PART 9: FILES PRODUCED
+================================================================================
+
+  build/eac_ida_deep.txt       — Part 1 IDAPython output (segments, functions,
+                                  VM calls, FltRegisterFilter xrefs)
+  build/eac_ida_deep2.txt      — Part 2 IDAPython output (API strings, VM stubs,
+                                  decompilation, .data pointers)
+  build/eac_ida_analysis.py    — IDAPython script (Part 1)
+  build/eac_ida_part2.py       — IDAPython script (Part 2)
+  build/CTF_103_EAC_Deep_Analysis.txt — This report
+
+
+================================================================================
+END OF DEEP ANALYSIS REPORT
+================================================================================

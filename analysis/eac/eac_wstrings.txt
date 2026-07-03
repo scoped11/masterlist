@@ -1,0 +1,42 @@
+\EasyAntiCheat_EOS\
+TrustedAppRoot
+AuthRoot
+%s\SOFTWARE\Microsoft\SystemCertificates\%s\Certificates\
+FlightRoot
+CertCheck
+00AAC56B-CD44-11D0-8CC2-00C04FC295EE
+Cleanup
+WintrustCertificateTrust
+Certificate
+SoftpubCheckCert
+Initialization
+SoftpubAuthenticode
+FinalPolicy
+SoftpubCleanup
+Signature
+SoftpubLoadMessage
+Message
+SoftpubInitialize
+DriverFinalPolicy
+DriverCleanupPolicy
+F750E6C3-38EE-11D1-85E5-00C04FC295EE
+SoftpubLoadSignature
+DriverInitializePolicy
+\\?\\\.\\??\UNC\\??\
+VS_VERSION_INFO
+StringFileInfo
+040904b0
+CompanyName
+EasyAntiCheat Oy
+LegalCopyright
+Copyright Epic Games, Inc. All Rights Reserved.
+ProductName
+Easy Anti-Cheat (EOS)
+ProductVersion
+3.2.0
+FileDescription
+Easy Anti-Cheat (EOS) driver
+InternalName
+EasyAntiCheat_EOS.sys
+VarFileInfo
+Translation

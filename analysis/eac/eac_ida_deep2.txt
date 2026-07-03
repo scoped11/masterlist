@@ -1,0 +1,179 @@
+================================================================================
+EAC DRIVER DEEP ANALYSIS Part 2 (IDAPython)
+================================================================================
+
+=== API NAME STRINGS FOUND ===
+  NOT FOUND: 'MmGetSystemRoutineAddress'
+  NOT FOUND: 'ObRegisterCallbacks'
+  NOT FOUND: 'PsSetCreateProcessNotifyRoutine'
+  NOT FOUND: 'PsSetLoadImageNotifyRoutine'
+  NOT FOUND: 'PsSetCreateThreadNotifyRoutine'
+  NOT FOUND: 'ZwQuerySystemInformation'
+  NOT FOUND: 'NtQuerySystemInformation'
+  NOT FOUND: 'MmCopyVirtualMemory'
+  NOT FOUND: 'KeStackAttachProcess'
+  NOT FOUND: 'PsLookupProcessByProcessId'
+  NOT FOUND: 'IoCreateDevice'
+  NOT FOUND: 'IoCreateSymbolicLink'
+  NOT FOUND: 'RtlInitUnicodeString'
+  NOT FOUND: 'ExAllocatePool'
+  NOT FOUND: 'MmMapIoSpace'
+  NOT FOUND: 'ZwOpenKey'
+  NOT FOUND: 'ZwQueryValueKey'
+  NOT FOUND: 'PsGetCurrentProcess'
+  NOT FOUND: 'ZwQueryDirectoryFile'
+  NOT FOUND: 'MmGetPhysicalAddress'
+  NOT FOUND: 'ZwCreateFile'
+  NOT FOUND: 'NtReadVirtualMemory'
+  NOT FOUND: 'MmProbeAndLockPages'
+  NOT FOUND: 'KeAttachProcess'
+  NOT FOUND: 'ObOpenObjectByPointer'
+  NOT FOUND: 'NtClose'
+  NOT FOUND: 'PsGetProcessPeb'
+  NOT FOUND: 'PsGetProcessImageFileName'
+  NOT FOUND: 'IoGetCurrentProcess'
+  NOT FOUND: 'MmIsAddressValid'
+  NOT FOUND: 'ExAllocatePoolWithTag'
+  NOT FOUND: 'KeInitializeApc'
+  NOT FOUND: 'KeInsertQueueApc'
+  NOT FOUND: 'PsGetProcessWow64Process'
+  NOT FOUND: 'ZwOpenProcess'
+  NOT FOUND: 'ZwOpenThread'
+  FOUND: 'FltRegisterFilter' at 0x14017E20A
+  NOT FOUND: 'FltStartFiltering'
+  NOT FOUND: 'CmRegisterCallbackEx'
+  NOT FOUND: 'CmUnRegisterCallback'
+  NOT FOUND: 'ExRegisterCallback'
+  NOT FOUND: 'IoRegisterFsRegistrationChange'
+  NOT FOUND: 'PsRemoveCreateThreadNotifyRoutine'
+  NOT FOUND: 'PsRemoveLoadImageNotifyRoutine'
+  NOT FOUND: 'ObUnRegisterCallbacks'
+
+=== VM ENTRY STUB (seg005: 0x14028D000-0x140290000) ===
+Functions in stub: 0
+
+=== .DATA FUNCTION POINTERS ===
+Total code pointers in .data (first 128KB): 158
+Pointers to .text: 42
+Pointers to VM section: 0
+
+VM section pointers (dispatch table candidates):
+
+=== KEY FUNCTION DECOMPILATION ===
+
+--- DriverEntry (0x14017E150) size=0x2C ---
+  NTSTATUS __stdcall DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
+  {
+    sub_14017E17C();
+    return sub_1400A5C00((__int64)DriverObject, (__int64)RegistryPath);
+  }
+  
+
+--- sub_14017E17C_security_init (0x14017E17C) size=0x2E ---
+  uintptr_t sub_14017E17C()
+  {
+    if ( _security_cookie == 0 || _security_cookie == 0x2B992DDFA232LL )
+      __fastfail(6u);
+    qword_14020D038 = ~_security_cookie;
+    return ~_security_cookie;
+  }
+  
+
+--- sub_140089770_real_init (0x140089770) --- [no function found]
+
+--- sub_14017E190_flt_caller (0x14017E190) size=0x2E ---
+  uintptr_t sub_14017E17C()
+  {
+    if ( _security_cookie == 0 || _security_cookie == 0x2B992DDFA232LL )
+      __fastfail(6u);
+    qword_14020D038 = ~_security_cookie;
+    return ~_security_cookie;
+  }
+  
+
+=== INTERESTING STRINGS IN .RDATA ===
+
+=== VM SECTION FIRST 5 FUNCTIONS ===
+  0x140290000 sub_140290000 size=0x10B
+    0x140290000: mov     [rsp+arg_0], r8
+    0x140290005: movups  [rsp+arg_8], xmm1
+    0x14029000A: mov     [rsp+arg_18], r10
+    0x14029000F: movups  [rsp+arg_20], xmm0
+    0x140290014: push    rax
+    0x140290015: lea     rax, [rsp+8+arg_1C0]
+    0x14029001D: mov     [rsp+8+arg_30], rax
+    0x140290022: pop     rax
+    0x140290023: movups  [rsp+arg_38], xmm13
+    0x140290029: movups  [rsp+arg_48], xmm2
+    0x14029002E: mov     [rsp+arg_58], rdx
+    0x140290033: movups  [rsp+arg_60], xmm7
+    0x140290038: mov     [rsp+arg_70], rcx
+    0x14029003D: movups  [rsp+arg_78], xmm3
+    0x140290045: mov     [rsp+arg_88], rax
+    0x14029004D: mov     [rsp+arg_90], r11
+    0x140290055: movups  [rsp+arg_98], xmm12
+    0x14029005E: mov     [rsp+arg_A8], r13
+    0x140290066: mov     [rsp+arg_B0], rbx
+    0x14029006E: movups  [rsp+arg_B8], xmm10
+  0x14029010B sub_14029010B size=0x1D
+    0x14029010B: push    rax
+    0x14029010C: push    rbx
+    0x14029010D: mov     rax, 0FFFFFFFFFFD6914Dh
+    0x140290114: mov     rbx, [rsp+10h]
+    0x140290119: lea     rbx, [rbx+rax]
+    0x14029011D: mov     [rsp+10h+arg_158], rbx
+    0x140290125: pop     rbx
+    0x140290126: pop     rax
+    0x140290127: retn
+  0x140290128 sub_140290128 size=0xE6
+    0x140290128: mov     r8, [rsp+arg_0]
+    0x14029012D: movups  xmm1, [rsp+arg_8]
+    0x140290132: mov     r10, [rsp+arg_18]
+    0x140290137: movups  xmm0, [rsp+arg_20]
+    0x14029013C: movups  xmm13, [rsp+arg_38]
+    0x140290142: movups  xmm2, [rsp+arg_48]
+    0x140290147: mov     rdx, [rsp+arg_58]
+    0x14029014C: movups  xmm7, [rsp+arg_60]
+    0x140290151: mov     rcx, [rsp+arg_70]
+    0x140290156: movups  xmm3, [rsp+arg_78]
+    0x14029015E: mov     rax, [rsp+arg_88]
+    0x140290166: mov     r11, [rsp+arg_90]
+    0x14029016E: movups  xmm12, [rsp+arg_98]
+    0x140290177: mov     r13, [rsp+arg_A8]
+    0x14029017F: mov     rbx, [rsp+arg_B0]
+    0x140290187: movups  xmm10, [rsp+arg_B8]
+    0x140290190: mov     rsi, [rsp+arg_C8]
+    0x140290198: mov     rbp, [rsp+arg_D0]
+    0x1402901A0: movups  xmm5, [rsp+arg_D8]
+    0x1402901A8: movups  xmm4, [rsp+arg_E8]
+  0x1402904FA sub_1402904FA size=0x10B
+    0x1402904FA: mov     [rsp+arg_0], r8
+    0x1402904FF: movups  [rsp+arg_8], xmm1
+    0x140290504: mov     [rsp+arg_18], r10
+    0x140290509: movups  [rsp+arg_20], xmm0
+    0x14029050E: push    rax
+    0x14029050F: lea     rax, [rsp+8+arg_1C0]
+    0x140290517: mov     [rsp+8+arg_30], rax
+    0x14029051C: pop     rax
+    0x14029051D: movups  [rsp+arg_38], xmm13
+    0x140290523: movups  [rsp+arg_48], xmm2
+    0x140290528: mov     [rsp+arg_58], rdx
+    0x14029052D: movups  [rsp+arg_60], xmm7
+    0x140290532: mov     [rsp+arg_70], rcx
+    0x140290537: movups  [rsp+arg_78], xmm3
+    0x14029053F: mov     [rsp+arg_88], rax
+    0x140290547: mov     [rsp+arg_90], r11
+    0x14029054F: movups  [rsp+arg_98], xmm12
+    0x140290558: mov     [rsp+arg_A8], r13
+    0x140290560: mov     [rsp+arg_B0], rbx
+    0x140290568: movups  [rsp+arg_B8], xmm10
+  0x140290605 sub_140290605 size=0x1D
+    0x140290605: push    rax
+    0x140290606: push    rbx
+    0x140290607: mov     rax, 0FFFFFFFFFFD68C53h
+    0x14029060E: mov     rbx, [rsp+10h]
+    0x140290613: lea     rbx, [rbx+rax]
+    0x140290617: mov     [rsp+10h+arg_158], rbx
+    0x14029061F: pop     rbx
+    0x140290620: pop     rax
+    0x140290621: retn

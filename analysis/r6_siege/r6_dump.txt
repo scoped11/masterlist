@@ -1,0 +1,289 @@
+Static Game Binary Dump
+Game: r6
+Path: C:\Program Files (x86)\Steam\steamapps\common\Tom Clancy's Rainbow Six Siege
+Date: 2026-07-02 02:16:29
+
+=== PE Analysis: C:\Program Files (x86)\Steam\steamapps\common\Tom Clancy's Rainbow Six Siege\RainbowSix.exe ===
+  Image Base:     0x140000000
+  Entry Point:    0x156C536DE (RVA 0x16C536DE)
+  Size of Image:  0x1ED04000 (504848 KB)
+  File Size:      137073224 bytes (130.7 MB)
+  Sections:       14
+  TimeDateStamp:  0x14E196D9
+  Characteristics: 0x22 [EXE]
+  Subsystem:      Windows GUI
+
+  Sections:
+  Name       VirtAddr     VirtSize     RawSize      RawPtr     Flags
+  .text      0x00001000   0x141097F6   0x00000000   0x00000000 0x60000020 X R
+  .rdata     0x1410B000   0x00CAEBB0   0x00000000   0x00000000 0x40000040 R
+  .data      0x14DBA000   0x0146D71C   0x00000000   0x00000000 0xC0000040 R W
+  .pdata     0x16228000   0x003DFCF8   0x00000000   0x00000000 0x40000040 R
+  .00cfg     0x16608000   0x00000038   0x00000000   0x00000000 0x40000040 R
+  .gxfg      0x16609000   0x000042C0   0x00000000   0x00000000 0x40000040 R
+  .retplne   0x1660E000   0x0000007C   0x00000000   0x00000000 0x00000000
+  .tls       0x1660F000   0x0000A751   0x00000000   0x00000000 0xC0000040 R W
+  .voltbl    0x1661A000   0x0000059D   0x00000000   0x00000000 0x00000000
+  _RDATA     0x1661B000   0x00033304   0x00000000   0x00000000 0x40000040 R
+  .UBX0      0x1664F000   0x00312B77   0x00000000   0x00000000 0x60000020 X R
+  .UBX1      0x16962000   0x08257C40   0x08257E00   0x00000400 0x68000060 X R
+  .reloc     0x1EBBA000   0x000000EC   0x00000200   0x08258200 0x40000040 R
+  .rsrc      0x1EBBB000   0x0014898C   0x0005CE00   0x08258400 0x40000040 R
+
+  Imported DLLs:
+    ADVAPI32.dll (1 functions)
+    defaultargs.dll (1 functions)
+    GDI32.dll (1 functions)
+    IMM32.dll (1 functions)
+    SHELL32.dll (1 functions)
+    WTSAPI32.dll (1 functions)
+    USER32.dll (1 functions)
+    KERNEL32.dll (1 functions)
+    ole32.dll (1 functions)
+    OLEAUT32.dll (1 functions)
+    WindowsCodecs.dll (1 functions)
+    WS2_32.dll (1 functions)
+    pdh.dll (1 functions)
+    POWRPROF.dll (1 functions)
+    api-ms-win-power-base-l1-1-0.dll (1 functions)
+    amd_ags_x64.dll (1 functions)
+    upc_r2_loader64.dll (1 functions)
+    ncrypt.dll (1 functions)
+    tbs.dll (1 functions)
+    CRYPT32.dll (1 functions)
+    bcrypt.dll (1 functions)
+    steam_api64.dll (1 functions)
+    RPCRT4.dll (1 functions)
+    SHLWAPI.dll (1 functions)
+    IPHLPAPI.DLL (1 functions)
+    XINPUT9_1_0.dll (1 functions)
+    COMCTL32.dll (1 functions)
+    DINPUT8.dll (1 functions)
+    VERSION.dll (1 functions)
+    d3d12.dll (1 functions)
+    GFSDK_Aftermath_Lib.x64.dll (1 functions)
+    SETUPAPI.dll (1 functions)
+    dxgi.dll (1 functions)
+    WINMM.dll (1 functions)
+    vivoxsdk.dll (1 functions)
+    libtox.dll (1 functions)
+    WINHTTP.dll (1 functions)
+    d3d9.dll (1 functions)
+    HID.DLL (1 functions)
+    api-ms-win-core-path-l1-1-0.dll (1 functions)
+    KERNEL32.dll (12 functions)
+    USER32.dll (2 functions)
+  Total: 42 DLLs
+
+  Exports (scimitar_engine_win64_2022_flto_dx12.exe) — 662 functions, 662 names:
+    [   1] 0x13898250  ??$PostErrorCodeInFinal@I@Monitor@AK@@YA?AW4AKRESULT@@W4ErrorCode@01@II_KAEBI@Z
+    [   2] 0x1389AB00  ??$PostErrorCodeInFinal@II@Monitor@AK@@YA?AW4AKRESULT@@W4ErrorCode@01@II_KAEBI2@Z
+    [   3] 0x1389A910  ??$PostErrorCodeInFinal@III@Monitor@AK@@YA?AW4AKRESULT@@W4ErrorCode@01@II_KAEBI22@Z
+    [   4] 0x13A28700  ??$PostErrorCodeInFinal@IPEAD@Monitor@AK@@YA?AW4AKRESULT@@W4ErrorCode@01@II_KAEBIAEBQEAD@Z
+    [   5] 0x1389B810  ??$PostErrorCodeInFinal@IPEBD@Monitor@AK@@YA?AW4AKRESULT@@W4ErrorCode@01@II_KAEBIAEBQEBD@Z
+    [   6] 0x1389B810  ??$PostErrorCodeInFinal@IPEB_W@Monitor@AK@@YA?AW4AKRESULT@@W4ErrorCode@01@II_KAEBIAEBQEB_W@Z
+    [   7] 0x1389AA10  ??$PostErrorCodeInFinal@W4AkQueuedMsgType@@II@Monitor@AK@@YA?AW4AKRESULT@@W4ErrorCode@01@II_KAEBW4AkQueuedMsgType@@AEBI3@Z
+    [   8] 0x139F30A0  ??0ReadBytesMem@AK@@QEAA@PEBXH@Z
+    [   9] 0x139F3080  ??0ReadBytesMem@AK@@QEAA@XZ
+    [  10] 0x13FC1FC0  ??0ReadBytesSkip@AK@@QEAA@PEBXH@Z
+    [  11] 0x13FC1FA0  ??0ReadBytesSkip@AK@@QEAA@XZ
+    [  12] 0x139F34E0  ??0WriteBytesBuffer@AK@@QEAA@XZ
+    [  13] 0x13FC20B0  ??0WriteBytesCount@AK@@QEAA@XZ
+    [  14] 0x139F31F0  ??0WriteBytesMem@AK@@QEAA@XZ
+    [  15] 0x13A9F380  ??1CAkEmitter@@UEAA@XZ
+    [  16] 0x13D287D0  ??1CAkGameObject@@UEAA@XZ
+    [  17] 0x13A9EE40  ??1CAkRegisteredObj@@UEAA@XZ
+    [  18] 0x139F30C0  ??1ReadBytesMem@AK@@UEAA@XZ
+    [  19] 0x13FC1FE0  ??1ReadBytesSkip@AK@@UEAA@XZ
+    [  20] 0x139F3500  ??1WriteBytesBuffer@AK@@UEAA@XZ
+    [  21] 0x13FC20D0  ??1WriteBytesCount@AK@@UEAA@XZ
+    [  22] 0x139F3220  ??1WriteBytesMem@AK@@UEAA@XZ
+    [  23] 0x13894BC0  ?AddDefaultListener@SoundEngine@AK@@YA?AW4AKRESULT@@_K@Z
+    [  24] 0x1389E7A0  ?AddLanguageChangeObserver@StreamMgr@AK@@YA?AW4AKRESULT@@P6AXQEB_WPEAX@Z1@Z
+    [  25] 0x13894B50  ?AddListener@SoundEngine@AK@@YA?AW4AKRESULT@@_K0@Z
+    [  26] 0x13896C80  ?AddOutput@SoundEngine@AK@@YA?AW4AKRESULT@@AEBUAkOutputSettings@@PEA_KPEB_KI@Z
+    [  27] 0x13896910  ?AddOutputCaptureMarker@SoundEngine@AK@@YA?AW4AKRESULT@@PEBD@Z
+    [  28] 0x13A9D700  ?ApplyGain@AkMixer@@YAXPEAVAkAudioBuffer@@0UAkRamp@@_N@Z
+    [  29] 0x13A9D660  ?ApplyGainAndInterleave@AkMixer@@YAXPEAVAkAudioBuffer@@0UAkRamp@@_N@Z
+    [  30] 0x139F3150  ?Attach@ReadBytesMem@AK@@QEAAXPEBXH@Z
+    [  31] 0x139F3150  ?Attach@ReadBytesSkip@AK@@QEAAXPEBXH@Z
+    [  32] 0x13898690  ?Break@DynamicSequence@SoundEngine@AK@@YA?AW4AKRESULT@@I@Z
+    [  33] 0x1388EB40  ?Bytes@WriteBytesCount@AK@@UEBAPEAEXZ
+    [  34] 0x139F3380  ?Bytes@WriteBytesMem@AK@@UEBAPEAEXZ
+    [  35] 0x138930F0  ?CancelBankCallbackCookie@SoundEngine@AK@@YAXPEAX@Z
+    [  36] 0x13891510  ?CancelEventCallback@SoundEngine@AK@@YAXI@Z
+    [  37] 0x138914D0  ?CancelEventCallbackCookie@SoundEngine@AK@@YAXPEAX@Z
+    [  38] 0x138914F0  ?CancelEventCallbackGameObject@SoundEngine@AK@@YAX_K@Z
+    [  39] 0x139F3590  ?Clear@WriteBytesBuffer@AK@@QEAAXXZ
+    [  40] 0x13A81E70  ?Clear@WriteBytesCount@AK@@UEAAXXZ
+    [  41] 0x139F33B0  ?Clear@WriteBytesMem@AK@@UEAAXXZ
+    [  42] 0x13891C30  ?ClearBanks@SoundEngine@AK@@YA?AW4AKRESULT@@XZ
+    [  43] 0x138936D0  ?ClearPreparedEvents@SoundEngine@AK@@YA?AW4AKRESULT@@XZ
+    [  44] 0x138983E0  ?Close@DynamicSequence@SoundEngine@AK@@YA?AW4AKRESULT@@I@Z
+    [  45] 0x139F3350  ?Count@ReadBytesSkip@AK@@QEAAHXZ
+    [  46] 0x139F3370  ?Count@WriteBytesCount@AK@@UEBAHXZ
+    [  47] 0x139F3350  ?Count@WriteBytesMem@AK@@UEBAHXZ
+    [  48] 0x1389E520  ?Create@StreamMgr@AK@@YAPEAVIAkStreamMgr@2@AEBUAkStreamMgrSettings@@@Z
+    [  49] 0x12B05460  ?CreateContext@voicechat@harbour@@YA?AV?$unique_ptr@UContext@voicechat@harbour@@U?$Deleter@UContext@voicechat@harbour@@@internal@3@@std@@PEBX@Z
+    [  50] 0x1389E5C0  ?CreateDevice@StreamMgr@AK@@YAIAEBUAkDeviceSettings@@PEAVIAkLowLevelIOHook@12@@Z
+    [  51] 0x13892320  ?DecodeBank@SoundEngine@AK@@YA?AW4AKRESULT@@PEBXIHAEAPEAXAEAI@Z
+    [  52] 0x1389E5E0  ?DestroyDevice@StreamMgr@AK@@YA?AW4AKRESULT@@I@Z
+    [  53] 0x1388EB40  ?Detach@WriteBytesCount@AK@@UEAAPEAEXZ
+    [  54] 0x139F3390  ?Detach@WriteBytesMem@AK@@UEAAPEAEXZ
+    [  55] 0x1388DDA0  ?DumpToFile@MemoryMgr@AK@@YAXPEB_W@Z
+    [  56] 0x13A08640  ?EncodeVector@CAkSpeakerPan@@SAXHPEAM0@Z
+    [  57] 0x138902D0  ?ExecuteActionOnEvent@SoundEngine@AK@@YA?AW4AKRESULT@@IW4AkActionOnEventType@12@_KHW4AkCurveInterpolation@@I@Z
+    [  58] 0x138904D0  ?ExecuteActionOnEvent@SoundEngine@AK@@YA?AW4AKRESULT@@PEBDW4AkActionOnEventType@12@_KHW4AkCurveInterpolation@@I@Z
+    [  59] 0x13890490  ?ExecuteActionOnEvent@SoundEngine@AK@@YA?AW4AKRESULT@@PEB_WW4AkActionOnEventType@12@_KHW4AkCurveInterpolation@@I@Z
+    [  60] 0x138916F0  ?ExecuteActionOnPlayingID@SoundEngine@AK@@YAXW4AkActionOnEventType@12@IHW4AkCurveInterpolation@@@Z
+    [  61] 0x1389E910  ?FlushAllCaches@StreamMgr@AK@@YAXXZ
+    [  62] 0x138A0150  ?Free@MemoryMgr@AK@@YAXHPEAX@Z
+    [  63] 0x1388F2B0  ?GetAudioSettings@SoundEngine@AK@@YA?AW4AKRESULT@@AEAUAkAudioSettings@@@Z
+    [  64] 0x13891800  ?GetBackgroundMusicMute@SoundEngine@AK@@YA_NXZ
+    [  65] 0x13890DA0  ?GetBufferStatusForPinnedEvent@SoundEngine@AK@@YA?AW4AKRESULT@@IAEAMAEA_N@Z
+    [  66] 0x13890F30  ?GetBufferStatusForPinnedEvent@SoundEngine@AK@@YA?AW4AKRESULT@@PEBDAEAMAEA_N@Z
+    [  67] 0x13890FA0  ?GetBufferStatusForPinnedEvent@SoundEngine@AK@@YA?AW4AKRESULT@@PEB_WAEAMAEA_N@Z
+    [  68] 0x138981F0  ?GetBufferTick@SoundEngine@AK@@YAIXZ
+    [  69] 0x1388DDA0  ?GetCategoryStats@MemoryMgr@AK@@YAXHAEAUCategoryStats@12@@Z
+    [  70] 0x13896480  ?GetContainerHistory@SoundEngine@AK@@YA?AW4AKRESULT@@PEAVIWriteBytes@2@@Z
+    [  71] 0x1389E790  ?GetCurrentLanguage@StreamMgr@AK@@YAPEB_WXZ
+    [  72] 0x13A08610  ?GetDecodingMatrixShape@CAkSpeakerPan@@SAXUAkChannelConfig@@AEAIAEAH@Z
+    [  73] 0x1389E640  ?GetDefaultDeviceSettings@StreamMgr@AK@@YAXAEAUAkDeviceSettings@@@Z
+    [  74] 0x1389C970  ?GetDefaultInitSettings@MusicEngine@AK@@YAXAEAUAkMusicSettings@@@Z
+    [  75] 0x1388EDE0  ?GetDefaultInitSettings@SoundEngine@AK@@YAXAEAUAkInitSettings@@@Z
+    [  76] 0x1388EE70  ?GetDefaultPlatformInitSettings@SoundEngine@AK@@YAXAEAUAkPlatformInitSettings@@@Z
+    [  77] 0x1389E1F0  ?GetDefaultSettings@MemoryMgr@AK@@YAXAEAUAkMemSettings@@@Z
+    [  78] 0x1388DDA0  ?GetDefaultSettings@StreamMgr@AK@@YAXAEAUAkStreamMgrSettings@@@Z
+    [  79] 0x13A14E40  ?GetDeviceID@AK@@YAIPEAUIMMDevice@@@Z
+    [  80] 0x13A14E90  ?GetDeviceIDFromName@AK@@YAIPEA_W@Z
+    [  81] 0x13897EA0  ?GetDeviceList@SoundEngine@AK@@YA?AW4AKRESULT@@IAEAIPEAUAkDeviceDescription@@@Z
+    [  82] 0x13897CA0  ?GetDeviceList@SoundEngine@AK@@YA?AW4AKRESULT@@IIAEAIPEAUAkDeviceDescription@@@Z
+    [  83] 0x13A15440  ?GetDeviceSpatialAudioSupport@SoundEngine@AK@@YA?AW4AKRESULT@@I@Z
+    [  84] 0x13898F30  ?GetDialogueEventCustomPropertyValue@DynamicDialogue@SoundEngine@AK@@YA?AW4AKRESULT@@IIAEAH@Z
+    [  85] 0x13899000  ?GetDialogueEventCustomPropertyValue@DynamicDialogue@SoundEngine@AK@@YA?AW4AKRESULT@@IIAEAM@Z
+    [  86] 0x1389E5A0  ?GetFileLocationResolver@StreamMgr@AK@@YAPEAVIAkFileLocationResolver@12@XZ
+    [  87] 0x1388F990  ?GetGlobalPluginContext@SoundEngine@AK@@YAPEAVIAkGlobalPluginContext@2@XZ
+    [  88] 0x138A0170  ?GetGlobalStats@MemoryMgr@AK@@YAXAEAUGlobalStats@12@@Z
+    [  89] 0x1388FE30  ?GetIDFromString@SoundEngine@AK@@YAIPEBD@Z
+    [  90] 0x1388FD40  ?GetIDFromString@SoundEngine@AK@@YAIPEB_W@Z
+    [  91] 0x13A191D0  ?GetObj@CAkRegistryMgr@@QEAAPEAVCAkRegisteredObj@@_K@Z
+    [  92] 0x13A19210  ?GetObjAndAddref@CAkRegistryMgr@@QEAAPEAVCAkRegisteredObj@@_K@Z
+    [  93] 0x1388F370  ?GetOutputDeviceConfiguration@SoundEngine@AK@@YA?AW4AKRESULT@@_KAEAUAkChannelConfig@@AEAUAk3DAudioSinkCapabilities@@@Z
+    [  94] 0x13897230  ?GetOutputID@SoundEngine@AK@@YA_KII@Z
+    [  95] 0x138972A0  ?GetOutputID@SoundEngine@AK@@YA_KPEBDI@Z
+    [  96] 0x13897310  ?GetOutputID@SoundEngine@AK@@YA_KPEB_WI@Z
+    [  97] 0x1388F410  ?GetPanningRule@SoundEngine@AK@@YA?AW4AKRESULT@@AEAW4AkPanningRule@@_K@Z
+    [  98] 0x13898820  ?GetPauseTimes@DynamicSequence@SoundEngine@AK@@YA?AW4AKRESULT@@IAEAI0@Z
+    [  99] 0x13898890  ?GetPlayingItem@DynamicSequence@SoundEngine@AK@@YA?AW4AKRESULT@@IAEAIAEAPEAX@Z
+    [ 100] 0x1389C9B0  ?GetPlayingSegmentInfo@MusicEngine@AK@@YA?AW4AKRESULT@@IAEAUAkSegmentInfo@@_N@Z
+    [ 101] 0x139F3580  ?GetPos@WriteBytesBuffer@AK@@QEBAHXZ
+    [ 102] 0x138969E0  ?GetSampleRate@SoundEngine@AK@@YAIXZ
+    [ 103] 0x13898200  ?GetSampleTick@SoundEngine@AK@@YA_KXZ
+    [ 104] 0x13891530  ?GetSourcePlayPosition@SoundEngine@AK@@YA?AW4AKRESULT@@IPEAH_N@Z
+    [ 105] 0x13891590  ?GetSourcePlayPositions@SoundEngine@AK@@YA?AW4AKRESULT@@IPEAUAkSourcePosition@@PEAI_N@Z
+    [ 106] 0x138915D0  ?GetSourceStreamBuffering@SoundEngine@AK@@YA?AW4AKRESULT@@IAEAHAEA_N@Z
+    [ 107] 0x1388F4F0  ?GetSpeakerAngles@SoundEngine@AK@@YA?AW4AKRESULT@@PEAMAEAIAEAM_K@Z
+    [ 108] 0x1388F2E0  ?GetSpeakerConfiguration@SoundEngine@AK@@YA?AUAkChannelConfig@@_K@Z
+    [ 109] 0x1388EB40  ?GetTimeStamp@Monitor@AK@@YAHXZ
+    [ 110] 0x13A15240  ?GetWindowsDevice@AK@@YA_NHAEAIPEAPEAUIMMDevice@@W4AkAudioDeviceState@@@Z
+    [ 111] 0x13A151E0  ?GetWindowsDeviceCount@AK@@YAIW4AkAudioDeviceState@@@Z
+    [ 112] 0x13A150A0  ?GetWindowsDeviceName@AK@@YAPEB_WHAEAIW4AkAudioDeviceState@@@Z
+    [ 113] 0x1389DFD0  ?Init@MemoryMgr@AK@@YA?AW4AKRESULT@@PEAUAkMemSettings@@@Z
+    [ 114] 0x1389C850  ?Init@MusicEngine@AK@@YA?AW4AKRESULT@@PEAUAkMusicSettings@@@Z
+    [ 115] 0x1388EBB0  ?Init@SoundEngine@AK@@YA?AW4AKRESULT@@PEAUAkInitSettings@@PEAUAkPlatformInitSettings@@@Z
+    [ 116] 0x1389DFB0  ?InitForThread@MemoryMgr@AK@@YAXXZ
+    [ 117] 0x13A9D2A0  ?Instance@AkRuntimeEnvironmentMgr@AK@@SAPEAV12@XZ
+    [ 118] 0x138A0110  ?IsInitialized@MemoryMgr@AK@@YA_NXZ
+    [ 119] 0x1388EBA0  ?IsInitialized@SoundEngine@AK@@YA_NXZ
+    [ 120] 0x13891F60  ?LoadBank@SoundEngine@AK@@YA?AW4AKRESULT@@I@Z
+    [ 121] 0x13892A00  ?LoadBank@SoundEngine@AK@@YA?AW4AKRESULT@@IP6AXIPEBXW43@PEAX@Z2@Z
+    [ 122] 0x13891E50  ?LoadBank@SoundEngine@AK@@YA?AW4AKRESULT@@PEBDAEAI@Z
+    [ 123] 0x13892920  ?LoadBank@SoundEngine@AK@@YA?AW4AKRESULT@@PEBDP6AXIPEBXW43@PEAX@Z3AEAI@Z
+    [ 124] 0x13891D50  ?LoadBank@SoundEngine@AK@@YA?AW4AKRESULT@@PEB_WAEAI@Z
+    [ 125] 0x13892840  ?LoadBank@SoundEngine@AK@@YA?AW4AKRESULT@@PEB_WP6AXIPEBXW43@PEAX@Z3AEAI@Z
+    [ 126] 0x13892130  ?LoadBankMemoryCopy@SoundEngine@AK@@YA?AW4AKRESULT@@PEBXIAEAI@Z
+    [ 127] 0x13892B90  ?LoadBankMemoryCopy@SoundEngine@AK@@YA?AW4AKRESULT@@PEBXIP6AXI0W43@PEAX@Z2AEAI@Z
+    [ 128] 0x13892030  ?LoadBankMemoryView@SoundEngine@AK@@YA?AW4AKRESULT@@PEBXIAEAI@Z
+    [ 129] 0x13892A90  ?LoadBankMemoryView@SoundEngine@AK@@YA?AW4AKRESULT@@PEBXIP6AXI0W43@PEAX@Z2AEAI@Z
+    [ 130] 0x13892230  ?LoadBankSync@SoundEngine@AK@@YA?AW4AKRESULT@@PEBXIAEAI@Z
+    [ 131] 0x13898900  ?LockPlaylist@DynamicSequence@SoundEngine@AK@@YAPEAVPlaylist@123@I@Z
+    [ 132] 0x138A0160  ?Malign@MemoryMgr@AK@@YAPEAXH_KI@Z
+    [ 133] 0x138A0120  ?Malloc@MemoryMgr@AK@@YAPEAXH_K@Z
+    [ 134] 0x13A9D920  ?MixBypassNinNChannels@AkMixer@@YAXPEAVAkAudioBuffer@@0AEAUAkRamp@@PEBM2MGPEAVCAkSrcLpHpFilter@@@Z
+    [ 135] 0x13A9D9C0  ?MixChannel@AkMixer@@YAXPEAM0MMI@Z
+    [ 136] 0x13A9D750  ?MixFilterNinNChannels@AkMixer@@YAXPEAVAkAudioBuffer@@0AEAUAkRamp@@PEBM2MGPEAVCAkSrcLpHpFilter@@@Z
+    [ 137] 0x13A9D710  ?MixNinNChannels@AkMixer@@YAXPEAVAkAudioBuffer@@0AEAUAkRamp@@PEBM2MG@Z
+    [ 138] 0x13A9D730  ?MixOneInNChannels@AkMixer@@YAXPEIAMPEAVAkAudioBuffer@@UAkChannelConfig@@AEAUAkRamp@@PEBM4MG@Z
+    [ 139] 0x1388DDA0  ?MonitorStreamMgrInit@Monitor@AK@@YAXAEBUAkStreamMgrSettings@@@Z
+    [ 140] 0x1388DDA0  ?MonitorStreamMgrTerm@Monitor@AK@@YAXXZ
+    [ 141] 0x1388DDA0  ?MonitorStreamingDeviceDestroyed@Monitor@AK@@YAXI@Z
+    [ 142] 0x1388DDA0  ?MonitorStreamingDeviceInit@Monitor@AK@@YAXIAEBUAkDeviceSettings@@@Z
+    [ 143] 0x138917B0  ?MuteBackgroundMusic@SoundEngine@AK@@YAX_N@Z
+    [ 144] 0x138982D0  ?Open@DynamicSequence@SoundEngine@AK@@YAI_KIP6AXW4AkCallbackType@@PEAUAkCallbackInfo@@@ZPEAXW4DynamicSequenceType@123@@Z
+    [ 145] 0x138984E0  ?Pause@DynamicSequence@SoundEngine@AK@@YA?AW4AKRESULT@@IHW4AkCurveInterpolation@@@Z
+    [ 146] 0x13890920  ?PinEventInStreamCache@SoundEngine@AK@@YA?AW4AKRESULT@@ICC@Z
+    [ 147] 0x13890B10  ?PinEventInStreamCache@SoundEngine@AK@@YA?AW4AKRESULT@@PEBDCC@Z
+    [ 148] 0x13890AE0  ?PinEventInStreamCache@SoundEngine@AK@@YA?AW4AKRESULT@@PEB_WCC@Z
+    [ 149] 0x13898450  ?Play@DynamicSequence@SoundEngine@AK@@YA?AW4AKRESULT@@IHW4AkCurveInterpolation@@@Z
+    [ 150] 0x1388E5A0  ?PlaySourcePlugin@SoundEngine@AK@@YAIII_K@Z
+    [ 151] 0x1388EB10  ?PostCode@Monitor@AK@@YA?AW4AKRESULT@@W4ErrorCode@12@W4ErrorLevel@12@I_KI_N@Z
+    [ 152] 0x0074D500  ?PostErrorCodeInFinal@Monitor@AK@@YA?AW4AKRESULT@@W4ErrorCode@12@II_K@Z
+    [ 153] 0x1388FE80  ?PostEvent@SoundEngine@AK@@YAII_KIP6AXW4AkCallbackType@@PEAUAkCallbackInfo@@@ZPEAXIPEAUAkExternalSourceInfo@@I@Z
+    [ 154] 0x138900F0  ?PostEvent@SoundEngine@AK@@YAIPEBD_KIP6AXW4AkCallbackType@@PEAUAkCallbackInfo@@@ZPEAXIPEAUAkExternalSourceInfo@@I@Z
+    [ 155] 0x1388FF50  ?PostEvent@SoundEngine@AK@@YAIPEB_W_KIP6AXW4AkCallbackType@@PEAUAkCallbackInfo@@@ZPEAXIPEAUAkExternalSourceInfo@@I@Z
+    [ 156] 0x13890550  ?PostMIDIOnEvent@SoundEngine@AK@@YAII_KPEAUAkMIDIPost@@G_NIP6AXW4AkCallbackType@@PEAUAkCallbackInfo@@@ZPEAXI@Z
+    [ 157] 0x1388EB10  ?PostString@Monitor@AK@@YA?AW4AKRESULT@@PEBDW4ErrorLevel@12@I_KI_N@Z
+    [ 158] 0x1388EB10  ?PostString@Monitor@AK@@YA?AW4AKRESULT@@PEB_WW4ErrorLevel@12@I_KI_N@Z
+    [ 159] 0x13895480  ?PostTrigger@SoundEngine@AK@@YA?AW4AKRESULT@@I_K@Z
+    [ 160] 0x13895550  ?PostTrigger@SoundEngine@AK@@YA?AW4AKRESULT@@PEBD_K@Z
+    [ 161] 0x138954E0  ?PostTrigger@SoundEngine@AK@@YA?AW4AKRESULT@@PEB_W_K@Z
+    [ 162] 0x13893620  ?PrepareBank@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@IP6AXIPEBXW43@PEAX@Z3W4AkBankContent@12@@Z
+    [ 163] 0x13893350  ?PrepareBank@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@IW4AkBankContent@12@@Z
+    [ 164] 0x13893530  ?PrepareBank@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@PEBDP6AXIPEBXW43@PEAX@Z4W4AkBankContent@12@@Z
+    [ 165] 0x13893230  ?PrepareBank@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@PEBDW4AkBankContent@12@@Z
+    [ 166] 0x13893440  ?PrepareBank@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@PEB_WP6AXIPEBXW43@PEAX@Z4W4AkBankContent@12@@Z
+    [ 167] 0x13893110  ?PrepareBank@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@PEB_WW4AkBankContent@12@@Z
+    [ 168] 0x13893BC0  ?PrepareEvent@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@PEAII@Z
+    [ 169] 0x13894000  ?PrepareEvent@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@PEAIIP6AXIPEBXW43@PEAX@Z4@Z
+    [ 170] 0x13893970  ?PrepareEvent@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@PEAPEBDI@Z
+    [ 171] 0x13893DD0  ?PrepareEvent@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@PEAPEBDIP6AXIPEBXW43@PEAX@Z4@Z
+    [ 172] 0x138937A0  ?PrepareEvent@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@PEAPEB_WI@Z
+    [ 173] 0x13893C40  ?PrepareEvent@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@PEAPEB_WIP6AXIPEBXW43@PEAX@Z4@Z
+    [ 174] 0x13894580  ?PrepareGameSyncs@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@W4AkGroupType@@IPEAII@Z
+    [ 175] 0x13894B00  ?PrepareGameSyncs@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@W4AkGroupType@@IPEAIIP6AXIPEBXW43@PEAX@Z5@Z
+    [ 176] 0x138942D0  ?PrepareGameSyncs@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@W4AkGroupType@@PEBDPEAPEBDI@Z
+    [ 177] 0x13894830  ?PrepareGameSyncs@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@W4AkGroupType@@PEBDPEAPEBDIP6AXIPEBXW43@PEAX@Z6@Z
+    [ 178] 0x138940F0  ?PrepareGameSyncs@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@W4AkGroupType@@PEB_WPEAPEB_WI@Z
+    [ 179] 0x13894620  ?PrepareGameSyncs@SoundEngine@AK@@YA?AW4AKRESULT@@W4PreparationType@12@W4AkGroupType@@PEB_WPEAPEB_WIP6AXIPEBXW43@PEAX@Z6@Z
+    [ 180] 0x139F30D0  ?ReadBytes@ReadBytesMem@AK@@UEAA_NPEAXHAEAH@Z
+    [ 181] 0x13FC1FF0  ?ReadBytes@ReadBytesSkip@AK@@UEAA_NPEAXHAEAH@Z
+    [ 182] 0x138A0130  ?Realloc@MemoryMgr@AK@@YAPEAXHPEAX_K@Z
+    [ 183] 0x138A0140  ?ReallocAligned@MemoryMgr@AK@@YAPEAXHPEAX_KI@Z
+    [ 184] 0x1388FD10  ?RegisterAudioDeviceStatusCallback@SoundEngine@AK@@YA?AW4AKRESULT@@P6AXPEAVIAkGlobalPluginContext@2@IIW4AkAudioDeviceEvent@2@W43@@Z@Z
+    [ 185] 0x13895930  ?RegisterBusMeteringCallback@SoundEngine@AK@@YA?AW4AKRESULT@@IP6AXPEAUAkBusMeteringCallbackInfo@@@ZW4AkMeteringFlags@@PEAX@Z
+    [ 186] 0x13895900  ?RegisterBusVolumeCallback@SoundEngine@AK@@YA?AW4AKRESULT@@IP6AXPEAUAkSpeakerVolumeMatrixCallbackInfo@@@ZPEAX@Z
+    [ 187] 0x138969F0  ?RegisterCaptureCallback@SoundEngine@AK@@YA?AW4AKRESULT@@P6AXAEAVAkAudioBuffer@@_KPEAX@Z12@Z
+    [ 188] 0x1388FA10  ?RegisterCodec@SoundEngine@AK@@YA?AW4AKRESULT@@IIP6APEAVIAkSoftwareCodec@@PEAX@Z1@Z
+    [ 189] 0x13891940  ?RegisterGameObj@SoundEngine@AK@@YA?AW4AKRESULT@@_K@Z
+    [ 190] 0x138919A0  ?RegisterGameObj@SoundEngine@AK@@YA?AW4AKRESULT@@_KPEBD@Z
+    [ 191] 0x1388FA40  ?RegisterGlobalCallback@SoundEngine@AK@@YA?AW4AKRESULT@@P6AXPEAVIAkGlobalPluginContext@2@W4AkGlobalCallbackLocation@@PEAX@ZI2W4AkPluginType@@II@Z
+    [ 192] 0x13895970  ?RegisterOutputDeviceMeteringCallback@SoundEngine@AK@@YA?AW4AKRESULT@@_KP6AXPEAUAkOutputDeviceMeteringCallbackInfo@@@ZW4AkMeteringFlags@@PEAX@Z
+    [ 193] 0x1388FA00  ?RegisterPlugin@SoundEngine@AK@@YA?AW4AKRESULT@@W4AkPluginType@@IIP6APEAVIAkPlugin@2@PEAVIAkPluginMemAlloc@2@@ZP6APEAVIAkPluginParam@2@1@ZP6A?AW43@AEAIPEAUAkDeviceDescription@@@Z@Z
+    [ 194] 0x13A15390  ?RegisterPluginDLL@SoundEngine@AK@@YA?AW4AKRESULT@@PEB_W0@Z
+    [ 195] 0x1388FD00  ?RegisterResourceMonitorCallback@SoundEngine@AK@@YA?AW4AKRESULT@@P6AXPEBUAkResourceMonitorDataSummary@@@Z@Z
+    [ 196] 0x13894BE0  ?RemoveDefaultListener@SoundEngine@AK@@YA?AW4AKRESULT@@_K@Z
+    [ 197] 0x1389E870  ?RemoveLanguageChangeObserver@StreamMgr@AK@@YAXPEAX@Z
+    [ 198] 0x13894B80  ?RemoveListener@SoundEngine@AK@@YA?AW4AKRESULT@@_K0@Z
+    [ 199] 0x13896F70  ?RemoveOutput@SoundEngine@AK@@YA?AW4AKRESULT@@_K@Z
+    [ 200] 0x1388F970  ?RenderAudio@SoundEngine@AK@@YA?AW4AKRESULT@@_N@Z
+    ... and 462 more
+
+  Pattern scan in section .text (VA 0x140001000, size 0x0):
+    GameManager               NOT FOUND (pattern may be outdated)
+    ProfileManager            NOT FOUND (pattern may be outdated)
+    NetworkManager            NOT FOUND (pattern may be outdated)
+    RoundManager              NOT FOUND (pattern may be outdated)
+    Camera                    NOT FOUND (pattern may be outdated)
+    FovManager                NOT FOUND (pattern may be outdated)
+  Result: 0/6 patterns matched
+
