@@ -439,6 +439,22 @@ All in `build_scripts/`:
 
 ---
 
+## 17. Session Transcripts
+
+Full Claude Code conversation logs, extracted from all project sessions and organized by project.
+
+See **[sessions/INDEX.md](sessions/INDEX.md)** for the full table with dates, first messages, and links.
+
+| Project | Sessions | Description |
+|---------|----------|-------------|
+| [CTF-Competition](sessions/CTF-Competition/) | 10 | CTF challenge — driver hooking, BattlEye integration, Unturned + mapper pipeline |
+| [Map-Project](sessions/Map-Project/) | 2 | Map/game utility sessions |
+| [Misc](sessions/Misc/) | 1 | VMware Workstation Pro setup |
+| [PenisFinger](sessions/PenisFinger/) | 27 | Main project — mapper, driver, DMA cheats, HWID spoofer, firmware, dumpers, stealth |
+| [CTF-Downloads](sessions/CTF-Downloads/) | 2 | CTF download/setup sessions |
+
+---
+
 ## Host Machine Profile
 
 - **PC1** (Gaming/Build): i9-12900K, Windows 10 Pro
