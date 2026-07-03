@@ -51,6 +51,11 @@ namespace Config
 	inline bool noFlash      = false;
 	inline bool nightVision  = false;
 
+	inline bool noclip       = false;
+	inline float noclipSpeed = 5.0f;
+	inline bool infiniteStats = false;
+	inline bool noDebuffs    = false;
+
 	// Extra ESP modes
 	inline bool espSkeleton  = false;
 	inline bool espChams     = false;

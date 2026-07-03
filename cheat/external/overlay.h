@@ -120,6 +120,8 @@ namespace Overlay
 		ME_SLD("Jump Multiplier",        &Config::jumpMultiplier, 1.0f, 10.0f, "x"),
 		ME_TOG("No Fall Damage",         &Config::noFallDamage),
 		ME_TOG_HK("Vehicle Fly",         &Config::vehicleFly,   &Config::hkVehicleFly),
+		ME_TOG("Noclip",                 &Config::noclip),
+		ME_SLD("Noclip Speed",           &Config::noclipSpeed,  1.0f, 15.0f, ""),
 	};
 	// Tab 4: Misc
 	static const MenuEntry tabMisc[] = {
@@ -131,6 +133,8 @@ namespace Overlay
 		ME_TOG("Force GPS",              &Config::forceGPS),
 		ME_TOG("Force Compass",          &Config::forceCompass),
 		ME_TOG("No Flash",               &Config::noFlash),
+		ME_TOG("Infinite Stats",         &Config::infiniteStats),
+		ME_TOG("No Debuffs",             &Config::noDebuffs),
 	};
 	// Tab 5: Colors — rendered separately by RenderColorSection
 
@@ -944,7 +948,7 @@ namespace Overlay
 		RegisterClassExA(&wc);
 
 		overlayWnd = CreateWindowExA(
-			WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+			WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
 			wndClass.c_str(), "",
 			WS_POPUP,
 			0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
@@ -1029,13 +1033,17 @@ namespace Overlay
 			int gw = clientRect.right;
 			int gh = clientRect.bottom;
 
-			// Only move/resize the overlay window when the game window actually changed
 			if (topLeft.x != g_cachedGX || topLeft.y != g_cachedGY ||
 				gw != g_cachedW || gh != g_cachedH)
 			{
-				SetWindowPos(overlayWnd, HWND_TOPMOST,
+				SetWindowPos(overlayWnd, HWND_TOP,
 					topLeft.x, topLeft.y, gw, gh, SWP_NOACTIVATE);
 				g_cachedGX = topLeft.x; g_cachedGY = topLeft.y;
+			}
+			else
+			{
+				SetWindowPos(overlayWnd, HWND_TOP, 0, 0, 0, 0,
+					SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 			}
 
 			HDC screenDC = GetDC(NULL);

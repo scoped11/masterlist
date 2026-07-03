@@ -793,6 +793,76 @@ namespace Features
 		}
 	}
 
+	inline void UpdateNoclip(SDG::Player* localPlayer)
+	{
+		if (!Config::noclip) return;
+		if (!Offsets::_movement || !Offsets::_look) return;
+
+		auto movement = localPlayer->movement();
+		if (!movement || (uintptr_t)movement < 0x10000) return;
+		auto look = localPlayer->look();
+		if (!look || (uintptr_t)look < 0x10000) return;
+
+		if (Offsets::pluginGravityMultiplier)
+			movement->pluginGravityMultiplier_set(0.01f);
+		if (Offsets::velocity)
+			movement->velocity_set({ 0, 0, 0 });
+		if (Offsets::pendingLaunchVelocity)
+			movement->pendingLaunchVelocity_set({ 0, 0, 0 });
+
+		float yawRad = look->yaw() * 3.14159265f / 180.0f;
+		float fwdX = sinf(yawRad);
+		float fwdZ = cosf(yawRad);
+		float rightX = cosf(yawRad);
+		float rightZ = -sinf(yawRad);
+
+		float dx = 0, dy = 0, dz = 0;
+		float speed = Config::noclipSpeed * 0.016f;
+		if (speed > 0.25f) speed = 0.25f;
+
+		if (GetAsyncKeyState('W') & 0x8000)     { dx += fwdX * speed; dz += fwdZ * speed; }
+		if (GetAsyncKeyState('S') & 0x8000)     { dx -= fwdX * speed; dz -= fwdZ * speed; }
+		if (GetAsyncKeyState('A') & 0x8000)     { dx -= rightX * speed; dz -= rightZ * speed; }
+		if (GetAsyncKeyState('D') & 0x8000)     { dx += rightX * speed; dz += rightZ * speed; }
+		if (GetAsyncKeyState(VK_SPACE) & 0x8000)   dy += speed;
+		if (GetAsyncKeyState(VK_CONTROL) & 0x8000) dy -= speed;
+
+		if (dx == 0 && dy == 0 && dz == 0) return;
+
+		auto go = localPlayer->gameObject();
+		if (!go) return;
+		auto t = go->transform();
+		vector3 pos = t.localPosition();
+		pos.x += dx;
+		pos.y += dy;
+		pos.z += dz;
+		t.setLocalPosition(pos);
+	}
+
+	inline void UpdateInfiniteStats(SDG::Player* localPlayer)
+	{
+		if (!Config::infiniteStats) return;
+		if (!Offsets::_life) return;
+		auto life = localPlayer->life();
+		if (!life || (uintptr_t)life < 0x10000) return;
+		if (Offsets::_food) life->food_set(100);
+		if (Offsets::_water) life->water_set(100);
+		if (Offsets::_stamina) life->stamina_set(100);
+		if (Offsets::_virus) life->virus_set(100);
+	}
+
+	inline void UpdateNoDebuffs(SDG::Player* localPlayer)
+	{
+		if (!Config::noDebuffs) return;
+		if (!Offsets::_life) return;
+		auto life = localPlayer->life();
+		if (!life || (uintptr_t)life < 0x10000) return;
+		if (Offsets::_isBleeding) life->isBleeding_set(false);
+		if (Offsets::_isBroken) life->isBroken_set(false);
+		if (Offsets::pl_stunDuration)
+			write<float>(0.0f, (uintptr_t)life + Offsets::pl_stunDuration);
+	}
+
 	inline int _worldEspTick = 0;
 
 	inline void Update(SDG::Player* localPlayer)
@@ -801,6 +871,7 @@ namespace Features
 		UpdateWeapon(localPlayer);
 		UpdateGodMode(localPlayer);
 		UpdateMovement(localPlayer);
+		UpdateNoclip(localPlayer);
 		UpdateScopeSway(localPlayer);
 		UpdateSpinBot(localPlayer);
 		UpdateNoFallDamage(localPlayer);
@@ -812,6 +883,8 @@ namespace Features
 		UpdateForceGPS(localPlayer);
 		UpdateForceCompass(localPlayer);
 		UpdateNoFlash(localPlayer);
+		UpdateInfiniteStats(localPlayer);
+		UpdateNoDebuffs(localPlayer);
 		GatherPlayerData(localPlayer);
 		UpdateAimbot(localPlayer);
 		UpdateTriggerbot(localPlayer);
