@@ -68,7 +68,7 @@ struct ESPConfig {
 };
 
 struct FullConfig {
-	bool vals[32] = {};
+	bool vals[40] = {};
 	float floats[12] = {};
 };
 
@@ -87,13 +87,14 @@ static const char* g_boolKeys[] = {
 	"esp","espBoxes","espNames","espDistance","espHealth","espSnaplines",
 	"radar","vehicleESP","itemESP","zombieESP","fullbright","fovChanger","chams","streamProof",
 	"speedHack","flyHack","superJump","vehicleFly","noFallDamage","noclip",
-	"godMode","adminMode"
+	"godMode","adminMode",
+	"lootFilterGuns","lootFilterMeds","lootFilterGear","lootSilent","lootStaggered"
 };
 static const int NUM_BOOLS = sizeof(g_boolKeys) / sizeof(g_boolKeys[0]);
 
 static const char* g_floatKeys[] = {
 	"speedMultiplier","jumpMultiplier","flySpeed","aimbotFOV","aimbotSmooth",
-	"customFOV","meleeRange","lootRadius","noclipSpeed"
+	"customFOV","meleeRange","lootRadius","noclipSpeed","lootDelay"
 };
 static const int NUM_FLOATS = sizeof(g_floatKeys) / sizeof(g_floatKeys[0]);
 
@@ -147,12 +148,18 @@ static const MenuItem g_menuItems[][12] = {
 		{"God Mode",      "godMode",       false,30, -1, 0,0},
 		{"Admin Mode",    "adminMode",     false,31, -1, 0,0},
 		{"Loot Teleport", "lootTeleport",  false,-1, -1, 0,0},
+		{"Silent Mode",   "lootSilent",    false,35, -1, 0,0},
+		{"Staggered",     "lootStaggered", false,36, -1, 0,0},
+		{"Filter: Guns",  "lootFilterGuns",false,32, -1, 0,0},
+		{"Filter: Meds",  "lootFilterMeds",false,33, -1, 0,0},
+		{"Filter: Gear",  "lootFilterGear",false,34, -1, 0,0},
 		{"Loot Radius",   "lootRadius",    true, -1, 7, 5.0f, 200.0f},
+		{"Stagger Delay", "lootDelay",     true, -1, 9, 1.0f, 30.0f},
 		{"Melee Range",   "meleeRange",    true, -1, 6, 1.0f, 50.0f},
-		{0},{0},{0},{0},{0},{0},{0},
+		{0},
 	},
 };
-static const int g_menuCounts[] = { 12, 12, 10, 5 };
+static const int g_menuCounts[] = { 12, 12, 10, 11 };
 
 // ============ GLOBALS ============
 
@@ -863,7 +870,7 @@ static void RenderMenu(HDC hdc, int sw, int sh, const FullConfig& fc)
 			FillRect2(hdc, barX, barY, (int)(barW * pct), 4, RGB(100, 170, 255));
 			cy += SLIDER_H;
 		} else {
-			bool on = (mi.boolIdx >= 0 && mi.boolIdx < 32) ? fc.vals[mi.boolIdx] : false;
+			bool on = (mi.boolIdx >= 0 && mi.boolIdx < NUM_BOOLS) ? fc.vals[mi.boolIdx] : false;
 			COLORREF tc = on ? RGB(100, 255, 100) : RGB(150, 60, 60);
 			DrawText2(hdc, MENU_X + 12, cy + 3, mi.label, RGB(200, 200, 210), g_menuFont);
 			const char* state = on ? "ON" : "OFF";

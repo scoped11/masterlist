@@ -50,6 +50,11 @@ namespace WebServer
 		{"chams",         &Config::chams},
 		{"streamProof",   &Config::streamProof},
 		{"lootTeleport",  &Config::lootTeleport},
+		{"lootFilterGuns",&Config::lootFilterGuns},
+		{"lootFilterMeds",&Config::lootFilterMeds},
+		{"lootFilterGear",&Config::lootFilterGear},
+		{"lootSilent",    &Config::lootSilent},
+		{"lootStaggered", &Config::lootStaggered},
 		{"espBoxes",      &Config::espBoxes},
 		{"espNames",      &Config::espNames},
 		{"espDistance",    &Config::espDistance},
@@ -71,6 +76,7 @@ namespace WebServer
 		{"customFOV",       &Config::customFOV,        60.0f, 160.0f},
 		{"meleeRange",      &Config::meleeRange,       1.0f, 50.0f},
 		{"lootRadius",      &Config::lootRadius,       5.0f, 200.0f},
+		{"lootDelay",       &Config::lootDelay,        1.0f, 30.0f},
 		{"noclipSpeed",     &Config::noclipSpeed,      1.0f, 15.0f},
 	};
 

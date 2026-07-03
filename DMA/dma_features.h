@@ -981,8 +981,59 @@ namespace Features
 		}
 	}
 
-	inline int lootCooldown = 0;
-	inline bool lootTabWasHeld = false;
+	enum LootCategory { LOOT_OTHER = 0, LOOT_GUN = 1, LOOT_MED = 2, LOOT_GEAR = 3 };
+
+	inline bool lootStrMatch(const char* haystack, const char* needle)
+	{
+		for (const char* h = haystack; *h; h++)
+		{
+			const char* hi = h;
+			const char* ni = needle;
+			while (*ni && ((*hi | 32) == (*ni | 32))) { hi++; ni++; }
+			if (!*ni) return true;
+		}
+		return false;
+	}
+
+	inline LootCategory ClassifyItem(const char* name)
+	{
+		if (!name || !name[0]) return LOOT_OTHER;
+		static const char* gunKw[] = {
+			"rifle","shotgun","pistol","smg","pdw","carbine","lmg",
+			"maplestrike","eaglefire","heartbreaker","zubeknakov","timberwolf",
+			"dragonfang","grizzly","hawkhound","bluntforce","honeybadger",
+			"nightraider","fusilaut","sabertooth","augewehr","snayperskya",
+			"matamorez","nykorev","vonya","cobra","viper","peacemaker",
+			"sportshot","masterkey","kryzkarek","crossbow","shadowstalker",
+			"scalar","avenger","determinator","bulldog","devils bane",
+			"desert falcon","calling card","swissgewehr","bow","luger",
+			"ace","colt","schofield","sportshot","swissgewehr",nullptr
+		};
+		for (int i = 0; gunKw[i]; i++)
+			if (lootStrMatch(name, gunKw[i])) return LOOT_GUN;
+		static const char* medKw[] = {
+			"medkit","dressing","splint","bloodbag","adrenaline","morphine",
+			"antibiotics","vitamins","rag","suture","vaccine","bandage",
+			"purification tablet",nullptr
+		};
+		for (int i = 0; medKw[i]; i++)
+			if (lootStrMatch(name, medKw[i])) return LOOT_MED;
+		static const char* gearKw[] = {
+			"scope","sight","barrel","grip","tactical","bipod","suppressor",
+			"muzzle","laser","magazine","drum","adaptive","chevron",
+			"dot sight","kobra","7x","8x","16x","flash hider",
+			"vertical grip","horizontal grip","ammo box","cartridge",
+			"shell","ranger drum","military drum","civilian clip",nullptr
+		};
+		for (int i = 0; gearKw[i]; i++)
+			if (lootStrMatch(name, gearKw[i])) return LOOT_GEAR;
+		return LOOT_OTHER;
+	}
+
+	inline bool lootFilterActive()
+	{
+		return Config::lootFilterGuns || Config::lootFilterMeds || Config::lootFilterGear;
+	}
 
 	struct SavedItemPos
 	{
@@ -991,6 +1042,19 @@ namespace Features
 	};
 	inline SavedItemPos savedPositions[256];
 	inline int savedPosCount = 0;
+	inline bool lootWasHeld = false;
+	inline int lootCooldown = 0;
+	inline int lootStaggerCd = 0;
+	inline int lootMovedCount = 0;
+	inline uint32_t lootRng = 0x1F2E3D4C;
+
+	inline float lootNextRng()
+	{
+		lootRng ^= lootRng << 13;
+		lootRng ^= lootRng >> 17;
+		lootRng ^= lootRng << 5;
+		return ((float)(lootRng & 0xFFFF) / 65536.0f) - 0.5f;
+	}
 
 	inline void RestoreLootPositions()
 	{
@@ -1013,16 +1077,24 @@ namespace Features
 
 		if (!tabHeld)
 		{
-			if (lootTabWasHeld && savedPosCount > 0)
+			if (lootWasHeld && savedPosCount > 0)
 				RestoreLootPositions();
-			lootTabWasHeld = false;
+			lootWasHeld = false;
 			lootCooldown = 0;
+			lootStaggerCd = 0;
+			lootMovedCount = 0;
 			return;
 		}
 
 		if (++lootCooldown < 5) return;
 		lootCooldown = 0;
-		lootTabWasHeld = true;
+		lootWasHeld = true;
+
+		if (Config::lootStaggered)
+		{
+			if (lootStaggerCd > 0) { lootStaggerCd--; return; }
+			lootStaggerCd = (int)Config::lootDelay;
+		}
 
 		auto go = localPlayer->gameObject();
 		if (!go) return;
@@ -1035,42 +1107,85 @@ namespace Features
 		uint32_t ic = items->Count();
 		if (ic > 256) ic = 256;
 
-		savedPosCount = 0;
-		int moved = 0;
-		for (uint32_t i = 0; i < ic && moved < 64; i++)
+		bool filtering = lootFilterActive();
+		if (!Config::lootStaggered) { savedPosCount = 0; lootMovedCount = 0; }
+
+		int movedThisTick = 0;
+		int maxPerTick = Config::lootStaggered ? 1 : 64;
+
+		for (uint32_t i = 0; i < ic && movedThisTick < maxPerTick; i++)
 		{
 			auto item = items->Get(i);
 			if (!item || (uintptr_t)item < 0x10000) continue;
 			auto igo = ((SDG::InteractableItem*)item)->gameObject();
 			if (!igo) continue;
 			auto it = igo->transform();
-			vector3 itemWorldPos = it.position();
-			vector3 itemLocalPos = it.localPosition();
-
-			float dist = Math::Distance(playerPos, itemWorldPos);
+			vector3 wpos = it.position();
+			float dist = Math::Distance(playerPos, wpos);
 			if (dist < 0.5f || dist > Config::lootRadius) continue;
 
-			if (savedPosCount < 256)
+			if (filtering && Offsets::ii_asset && Offsets::ia_itemName)
+			{
+				char itemName[32] = {};
+				uintptr_t assetPtr = ((SDG::InteractableItem*)item)->asset();
+				if (assetPtr && assetPtr > 0x10000)
+				{
+					uintptr_t nameStr = read<uintptr_t>(assetPtr + Offsets::ia_itemName);
+					if (nameStr && nameStr > 0x10000)
+					{
+						auto n = ReadManagedStringA(nameStr);
+						if (!n.empty()) strncpy_s(itemName, n.c_str(), 31);
+					}
+				}
+				LootCategory cat = ClassifyItem(itemName);
+				bool pass = false;
+				if (Config::lootFilterGuns && cat == LOOT_GUN) pass = true;
+				if (Config::lootFilterMeds && cat == LOOT_MED) pass = true;
+				if (Config::lootFilterGear && cat == LOOT_GEAR) pass = true;
+				if (!pass) continue;
+			}
+
+			bool alreadySaved = false;
+			for (int s = 0; s < savedPosCount; s++)
+			{
+				if (savedPositions[s].itemGO == (uintptr_t)igo) { alreadySaved = true; break; }
+			}
+			vector3 lpos = it.localPosition();
+			if (!alreadySaved && savedPosCount < 256)
 			{
 				savedPositions[savedPosCount].itemGO = (uintptr_t)igo;
-				savedPositions[savedPosCount].origPos = itemLocalPos;
+				savedPositions[savedPosCount].origPos = lpos;
 				savedPosCount++;
 			}
 
-			float angle = (float)moved * 0.39269908f;
-			float r = 1.5f + (float)(moved / 10) * 0.2f;
-			vector3 targetWorld = {
-				playerPos.x + cosf(angle) * r,
-				playerPos.y - 0.5f,
-				playerPos.z + sinf(angle) * r
-			};
+			vector3 target;
+			if (Config::lootSilent)
+			{
+				target = {
+					playerPos.x + lootNextRng() * 0.3f,
+					playerPos.y - 0.3f,
+					playerPos.z + lootNextRng() * 0.3f
+				};
+			}
+			else
+			{
+				float angle = (float)lootMovedCount * 0.39269908f;
+				float r = 1.5f + (float)(lootMovedCount / 10) * 0.2f;
+				target = {
+					playerPos.x + cosf(angle) * r + lootNextRng() * 0.15f,
+					playerPos.y - 0.5f,
+					playerPos.z + sinf(angle) * r + lootNextRng() * 0.15f
+				};
+			}
+
 			vector3 newLocal = {
-				itemLocalPos.x + (targetWorld.x - itemWorldPos.x),
-				itemLocalPos.y + (targetWorld.y - itemWorldPos.y),
-				itemLocalPos.z + (targetWorld.z - itemWorldPos.z)
+				lpos.x + (target.x - wpos.x),
+				lpos.y + (target.y - wpos.y),
+				lpos.z + (target.z - wpos.z)
 			};
 			it.setLocalPosition(newLocal);
-			moved++;
+			lootMovedCount++;
+			movedThisTick++;
 		}
 	}
 

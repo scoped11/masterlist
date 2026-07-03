@@ -255,12 +255,18 @@ R"RAWHTML(
 <h2>// Loot Teleport</h2>
 <div class="grid">
 <div class="item" data-k="lootTeleport"><span class="item-name">Loot Teleport</span><div class="sw"></div></div>
+<div class="item" data-k="lootSilent"><span class="item-name">Silent Mode</span><div class="sw"></div></div>
+<div class="item" data-k="lootStaggered"><span class="item-name">Staggered</span><div class="sw"></div></div>
+<div class="item" data-k="lootFilterGuns"><span class="item-name">Guns Only</span><div class="sw"></div></div>
+<div class="item" data-k="lootFilterMeds"><span class="item-name">Meds Only</span><div class="sw"></div></div>
+<div class="item" data-k="lootFilterGear"><span class="item-name">Gear Only</span><div class="sw"></div></div>
 </div>
 <div class="sliders">
 <div class="srow"><span class="slbl">RADIUS</span><input type="range" min="5" max="200" step="5" data-k="lootRadius"><span class="sval" id="v_lootRadius">50</span></div>
+<div class="srow"><span class="slbl">STAGGER</span><input type="range" min="1" max="30" step="1" data-k="lootDelay"><span class="sval" id="v_lootDelay">10</span></div>
 </div>
 <div class="loot-info">
-<b style="color:#ffaa00">How to use:</b> Toggle ON to pull all ground items within the radius to your feet. Walk over them or press F to pick up. Items respawn at their original server position if you leave the area. Works best with Item ESP enabled so you can see what is nearby. Set radius higher (100-200m) to vacuum a large area.
+<b style="color:#ffaa00">How to use:</b> Hold TAB to pull items. <b>Silent</b> drops items at your feet (less visible). <b>Staggered</b> moves one item per interval. Enable filter toggles to only grab <b>Guns</b>, <b>Meds</b>, or <b>Gear</b> (attachments/ammo). Multiple filters can be combined. With no filters, grabs everything.
 </div>
 </div>
 

@@ -49,6 +49,12 @@ namespace Config
 
 	inline bool lootTeleport = false;
 	inline float lootRadius = 50.0f;
+	inline bool lootFilterGuns = false;
+	inline bool lootFilterMeds = false;
+	inline bool lootFilterGear = false;
+	inline bool lootSilent = false;
+	inline bool lootStaggered = false;
+	inline float lootDelay = 10.0f;
 
 	inline bool noclip = false;
 	inline float noclipSpeed = 5.0f;
