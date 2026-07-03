@@ -94,7 +94,7 @@ static const int NUM_BOOLS = sizeof(g_boolKeys) / sizeof(g_boolKeys[0]);
 
 static const char* g_floatKeys[] = {
 	"speedMultiplier","jumpMultiplier","flySpeed","aimbotFOV","aimbotSmooth",
-	"customFOV","meleeRange","lootRadius","noclipSpeed","lootDelay"
+	"customFOV","meleeRange","lootRadius","noclipSpeed","lootDelay","vehicleFlySpeed"
 };
 static const int NUM_FLOATS = sizeof(g_floatKeys) / sizeof(g_floatKeys[0]);
 
@@ -141,7 +141,7 @@ static const MenuItem g_menuItems[][12] = {
 		{"Jump",          "jumpMultiplier",true, -1, 1, 1.0f, 2.0f},
 		{"Fly Speed",     "flySpeed",      true, -1, 2, 2.0f, 15.0f},
 		{"Noclip Speed",  "noclipSpeed",   true, -1, 8, 1.0f, 15.0f},
-		{0},
+		{"Veh Fly Spd",   "vehicleFlySpeed",true,-1,10, 1.0f, 10.0f},
 		{0},
 	},
 	{ // Player
@@ -159,7 +159,7 @@ static const MenuItem g_menuItems[][12] = {
 		{0},
 	},
 };
-static const int g_menuCounts[] = { 12, 12, 10, 11 };
+static const int g_menuCounts[] = { 12, 12, 11, 11 };
 
 // ============ GLOBALS ============
 

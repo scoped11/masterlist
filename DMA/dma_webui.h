@@ -194,6 +194,7 @@ R"RAWHTML(
 <div class="srow"><span class="slbl">JUMP</span><input type="range" min="1" max="2" step="0.1" data-k="jumpMultiplier"><span class="sval" id="v_jumpMultiplier">1.5</span></div>
 <div class="srow"><span class="slbl">FLY SPD</span><input type="range" min="2" max="15" step="1" data-k="flySpeed"><span class="sval" id="v_flySpeed">8</span></div>
 <div class="srow"><span class="slbl">NOCLIP SPD</span><input type="range" min="1" max="15" step="0.5" data-k="noclipSpeed"><span class="sval" id="v_noclipSpeed">5</span></div>
+<div class="srow"><span class="slbl">VEH FLY</span><input type="range" min="1" max="10" step="0.5" data-k="vehicleFlySpeed"><span class="sval" id="v_vehicleFlySpeed">3</span></div>
 </div>
 </div>
 

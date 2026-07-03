@@ -21,7 +21,10 @@ namespace Features
 	inline float spinAngle = 0;
 
 	inline float vehicleFlyYaw = 0;
+	inline float vehicleFlyTargetYaw = 0;
+	inline float vehicleFlyTargetY = 0;
 	inline bool vehicleFlyInit = false;
+	inline float vehicleFlyAccel = 0;
 
 	inline int chamsTimer = 0;
 	inline bool lastChamsState = false;
@@ -404,22 +407,46 @@ namespace Features
 					vector4 rot = vTransform.localRotation();
 					vehicleFlyYaw = atan2f(2.0f * (rot.w * rot.y + rot.x * rot.z),
 						1.0f - 2.0f * (rot.y * rot.y + rot.x * rot.x));
+					vehicleFlyTargetYaw = vehicleFlyYaw;
+					vehicleFlyTargetY = pos.y;
+					vehicleFlyAccel = 0;
 					vehicleFlyInit = true;
 				}
 
-				float speed = Config::speedMultiplier * 0.15f;
-				float turnSpeed = 0.03f;
+				float maxSpeed = Config::vehicleFlySpeed * 0.02f;
+				if (maxSpeed > 0.15f) maxSpeed = 0.15f;
+				float altSpeed = maxSpeed * 0.4f;
+				float turnSpeed = 0.015f;
 
-				if (GetAsyncKeyState(0x41) & 0x8000) vehicleFlyYaw -= turnSpeed;
-				if (GetAsyncKeyState(0x44) & 0x8000) vehicleFlyYaw += turnSpeed;
+				bool moving = false;
+				if (GetAsyncKeyState(0x41) & 0x8000) vehicleFlyTargetYaw -= turnSpeed;
+				if (GetAsyncKeyState(0x44) & 0x8000) vehicleFlyTargetYaw += turnSpeed;
+
+				float yawDiff = vehicleFlyTargetYaw - vehicleFlyYaw;
+				vehicleFlyYaw += yawDiff * 0.2f;
 
 				float fwd_x = sinf(vehicleFlyYaw);
 				float fwd_z = cosf(vehicleFlyYaw);
 
-				if (GetAsyncKeyState(0x57) & 0x8000) { pos.x += fwd_x * speed; pos.z += fwd_z * speed; }
-				if (GetAsyncKeyState(0x53) & 0x8000) { pos.x -= fwd_x * speed; pos.z -= fwd_z * speed; }
-				if (GetAsyncKeyState(VK_SPACE) & 0x8000) pos.y += speed;
-				if (GetAsyncKeyState(VK_CONTROL) & 0x8000) pos.y -= speed;
+				if (GetAsyncKeyState(0x57) & 0x8000 || GetAsyncKeyState(0x53) & 0x8000) moving = true;
+				if (GetAsyncKeyState(VK_SPACE) & 0x8000) vehicleFlyTargetY += altSpeed;
+				if (GetAsyncKeyState(VK_CONTROL) & 0x8000) vehicleFlyTargetY -= altSpeed;
+
+				if (moving)
+					vehicleFlyAccel += (1.0f - vehicleFlyAccel) * 0.08f;
+				else
+					vehicleFlyAccel *= 0.9f;
+
+				float curSpeed = maxSpeed * vehicleFlyAccel;
+
+				if (GetAsyncKeyState(0x57) & 0x8000) { pos.x += fwd_x * curSpeed; pos.z += fwd_z * curSpeed; }
+				if (GetAsyncKeyState(0x53) & 0x8000) { pos.x -= fwd_x * curSpeed; pos.z -= fwd_z * curSpeed; }
+
+				float yDiff = vehicleFlyTargetY - pos.y;
+				float yStep = yDiff * 0.15f;
+				if (yStep > altSpeed) yStep = altSpeed;
+				if (yStep < -altSpeed) yStep = -altSpeed;
+				pos.y += yStep;
 
 				float halfYaw = vehicleFlyYaw * 0.5f;
 				vector4 newRot = { 0, sinf(halfYaw), 0, cosf(halfYaw) };
@@ -432,6 +459,7 @@ namespace Features
 			if (Offsets::pluginGravityMultiplier)
 				movement->pluginGravityMultiplier_set(1.0f);
 			vehicleFlyInit = false;
+			vehicleFlyAccel = 0;
 			flyPulseTimer = 0;
 		}
 	}

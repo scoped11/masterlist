@@ -75,6 +75,7 @@ namespace WebServer
 		{"aimbotSmooth",    &Config::aimbotSmooth,     1.0f, 20.0f},
 		{"customFOV",       &Config::customFOV,        60.0f, 160.0f},
 		{"meleeRange",      &Config::meleeRange,       1.0f, 50.0f},
+		{"vehicleFlySpeed", &Config::vehicleFlySpeed,   1.0f, 10.0f},
 		{"lootRadius",      &Config::lootRadius,       5.0f, 200.0f},
 		{"lootDelay",       &Config::lootDelay,        1.0f, 30.0f},
 		{"noclipSpeed",     &Config::noclipSpeed,      1.0f, 15.0f},

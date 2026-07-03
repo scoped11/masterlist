@@ -62,5 +62,6 @@ namespace Config
 	inline bool noDebuffs = false;
 	inline bool alwaysGPS = false;
 	inline bool alwaysCompass = false;
+	inline float vehicleFlySpeed = 3.0f;
 	inline bool teleport = false;
 }
