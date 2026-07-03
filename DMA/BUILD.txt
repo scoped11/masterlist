@@ -37,9 +37,37 @@ Option B: Command Line (Developer Command Prompt)
 == Usage ==
 
   On PC2 (RADAR):
-    CoopyyDMA.exe              - Run cheat + web menu server
-    CoopyyDMA.exe --dump       - Dump all Unturned modules (PE dumper)
-    CoopyyDMA.exe --dump Game.exe  - Dump modules from a different game
+    CoopyyDMA.exe                         - Run cheat + web menu server (external ESP via esp_client)
+    CoopyyDMA.exe --internal --hwnd ABCD  - Internal ESP mode: injects rendering hook into game via DMA
+    CoopyyDMA.exe --dump                  - Dump all Unturned modules (PE dumper)
+    CoopyyDMA.exe --dump Game.exe         - Dump modules from a different game
+
+  Internal ESP Mode (--internal):
+    Instead of using esp_client.exe on PC1, this mode injects a D3D11 Present
+    hook directly into the game process via DMA memory writes. The ESP draws
+    inside the game window using GDI — no external overlay process on PC1.
+
+    Requirements:
+      - Game must be rendering (D3D11 swap chain must exist)
+      - --hwnd flag: the game window handle in hex (find on PC1 with:
+        powershell -c "(Get-Process Unturned).MainWindowHandle.ToString('X')")
+      - Mono JIT must have RWX pages with free space (normal for Unity games)
+
+    How it works:
+      1. Scans target process for IDXGISwapChain via DXGI vtable pattern matching
+      2. Finds a code cave in Mono JIT RWX pages (already executable, no VirtualAlloc)
+      3. Resolves GDI function addresses from user32/gdi32 via PEB->Ldr walk over DMA
+      4. Writes shellcode + shared data structure to the code cave
+      5. Hooks Present by overwriting the swap chain vtable entry (heap data, not code)
+      6. PC2 updates screen-space player positions in shared memory every frame via DMA
+      7. Shellcode draws ESP boxes using GDI on the game window each Present call
+
+    Stealth considerations:
+      - No loaded module (shellcode lives in existing JIT pages)
+      - No new threads (hooks an existing rendering call)
+      - VTable hook on heap data (code integrity checks don't cover heap)
+      - No VirtualAlloc/CreateThread/LoadLibrary calls
+      - GDI drawing from inside the process looks like normal application rendering
 
   On PC1 (Main):
     stealth_menu.exe 192.168.1.X        - Connect to RADAR PC web menu

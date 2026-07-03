@@ -4,6 +4,7 @@
 #include "dma_dumper.h"
 #include "dma_webserver.h"
 #include "dma_offsetdump.h"
+#include "dma_internal.h"
 #include <thread>
 
 #include "../external/unturned.cpp"
@@ -31,6 +32,16 @@ int main(int argc, char* argv[])
 		DMA::Close();
 		printf("\nDone.\n");
 		return 0;
+	}
+
+	bool internalMode = false;
+	uint64_t internalHwnd = 0;
+	for (int i = 1; i < argc; i++)
+	{
+		if (strcmp(argv[i], "--internal") == 0)
+			internalMode = true;
+		if (strcmp(argv[i], "--hwnd") == 0 && i + 1 < argc)
+			internalHwnd = strtoull(argv[++i], NULL, 16);
 	}
 
 	if (argc > 1 && strcmp(argv[1], "--list") == 0)
@@ -182,6 +193,54 @@ int main(int argc, char* argv[])
 
 		Log("[+] Local player: 0x%llX", (uintptr_t)localPlayer);
 
+		if (internalMode)
+		{
+			Log("\n=== INTERNAL ESP MODE ===");
+			Log("Injecting rendering hook into game process...\n");
+
+			if (!internalHwnd)
+			{
+				Log("[!] No HWND specified. Run with --hwnd <hex> to provide the game window handle.");
+				Log("    Find it on PC1: powershell -c \"(Get-Process Unturned).MainWindowHandle.ToString('X')\"");
+				Log("    Example: CoopyyDMA.exe --internal --hwnd 1A0B2C");
+				goto idle;
+			}
+
+			if (!InternalESP::inject())
+			{
+				Log("[-] Internal ESP injection failed");
+				goto idle;
+			}
+
+			Log("[+] Internal ESP active — drawing inside game on PC1");
+			Log("    HWND: 0x%llX", internalHwnd);
+			Log("    Control via web menu: http://localhost:9222");
+			Log("    Press END to unhook and exit\n");
+
+			while (true)
+			{
+				if (GetAsyncKeyState(VK_END) & 1)
+					break;
+
+				if (!SDG::Provider::isConnected())
+				{
+					Sleep(1000);
+					continue;
+				}
+
+				localPlayer = Features::GetLocalPlayer();
+				if (!localPlayer) { Sleep(500); continue; }
+
+				Features::Update(localPlayer);
+				InternalESP::updateSharedData(internalHwnd);
+				Sleep(10);
+			}
+
+			InternalESP::unhook();
+			Log("[+] Internal ESP unhooked");
+		}
+		else
+		{
 		Log("DMA cheat active. ESP renders on PC1 via esp_client.exe.");
 		Log("Control via web menu: http://localhost:9222");
 		Log("ESP data API: http://<this-pc-ip>:9222/api/gamedata\n");
@@ -206,6 +265,7 @@ int main(int argc, char* argv[])
 
 			Features::Update(localPlayer);
 			Sleep(10);
+		}
 		}
 
 		Sleep(200);
