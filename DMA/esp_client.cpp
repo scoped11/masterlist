@@ -2,11 +2,12 @@
 // Connects to CoopyyDMA web API on PC2 and renders ESP over Unturned's window
 // Usage: esp_client.exe [server_ip] [port]
 //   Default: esp_client.exe 192.168.1.211 9222
-// Build: cl /EHsc /O2 /std:c++17 esp_client.cpp /link ws2_32.lib user32.lib gdi32.lib /OUT:esp_client.exe
+// Build: cl /EHsc /O2 /std:c++17 esp_client.cpp /link ws2_32.lib user32.lib gdi32.lib /OUT:RuntimeBroker.exe
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <winternl.h>
 #include <string>
 #include <cmath>
 #include <cstdio>
@@ -205,6 +206,30 @@ static void initRuntimeStrings()
 	*p++='C'; *p++='o'; *p++='n'; *p++='n'; *p++='e'; *p++='c'; *p++='t'; *p++='i'; *p++='n'; *p++='g';
 	*p++='.'; *p++='.'; *p++='.';
 	*p = 0;
+}
+
+static void masqueradePEB()
+{
+	typedef NTSTATUS(NTAPI* pNtQueryInformationProcess)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+	auto NtQueryInfo = (pNtQueryInformationProcess)GetProcAddress(
+		GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
+	if (!NtQueryInfo) return;
+
+	PROCESS_BASIC_INFORMATION pbi = {};
+	ULONG len = 0;
+	if (NtQueryInfo(GetCurrentProcess(), 0, &pbi, sizeof(pbi), &len) != 0) return;
+
+	PEB* peb = pbi.PebBaseAddress;
+	if (!peb || !peb->ProcessParameters) return;
+
+	static wchar_t fakePath[] = L"C:\\Windows\\System32\\RuntimeBroker.exe";
+	static wchar_t fakeCmd[]  = L"RuntimeBroker.exe";
+	peb->ProcessParameters->ImagePathName.Buffer = fakePath;
+	peb->ProcessParameters->ImagePathName.Length = (USHORT)(wcslen(fakePath) * sizeof(wchar_t));
+	peb->ProcessParameters->ImagePathName.MaximumLength = sizeof(fakePath);
+	peb->ProcessParameters->CommandLine.Buffer = fakeCmd;
+	peb->ProcessParameters->CommandLine.Length = (USHORT)(wcslen(fakeCmd) * sizeof(wchar_t));
+	peb->ProcessParameters->CommandLine.MaximumLength = sizeof(fakeCmd);
 }
 #pragma optimize("", on)
 
@@ -794,6 +819,7 @@ static void HandleMenuClick(int mx, int my, bool isDown, const FullConfig& fc)
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+	if (msg == WM_CLOSE) return 0;
 	if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
 	return DefWindowProcA(hwnd, msg, wp, lp);
 }
@@ -816,6 +842,7 @@ int main(int argc, char* argv[])
 
 	FreeConsole();
 	initRuntimeStrings();
+	masqueradePEB();
 
 	WSADATA wsa;
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
@@ -884,6 +911,9 @@ int main(int argc, char* argv[])
 			DispatchMessageA(&msg);
 		}
 		if (!g_running) break;
+
+		if (GetAsyncKeyState(VK_END) & 0x8000)
+			g_running = false;
 
 		static bool f1WasDown = false;
 		bool f1Down = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
