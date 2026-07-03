@@ -1259,6 +1259,435 @@ static void WriteDiscoveredINI(const char* path,
     printf("[+] Discovered offsets written: %s\n", path);
 }
 
+// ── JVM / libGDX Game Analysis (Stalcraft, etc.) ────────────────────────────────
+// Live mode only — reads gHotSpotVMStructs from jvm.dll to get version-independent
+// JVM internal layout, then walks ClassLoaderDataGraph to enumerate all classes
+// and dump field offsets for DMA reads.
+
+struct VMStructEntry {
+    uint64_t typeName;
+    uint64_t fieldName;
+    uint64_t typeString;
+    int32_t  isStatic;
+    int32_t  _pad;
+    uint64_t offset;
+    uint64_t address;
+};
+
+struct JVMLayout {
+    uint64_t Universe_narrowKlass_base;
+    uint64_t Universe_narrowKlass_shift;
+    uint64_t Universe_collectedHeap;
+    uint64_t CLDG_head;
+    int32_t CLD_next;
+    int32_t CLD_klasses;
+    int32_t Klass_name;
+    int32_t Klass_nextLink;
+    int32_t Klass_layoutHelper;
+    int32_t Klass_superKlass;
+    int32_t IK_fields;
+    int32_t IK_constants;
+    int32_t IK_javaFieldsCount;
+    int32_t IK_sourceFileName;
+    int32_t Symbol_length;
+    int32_t Symbol_body;
+    int32_t CP_poolHolder;
+    int32_t CP_length;
+    int32_t Klass_size;
+    int32_t IK_size;
+    bool valid;
+};
+
+struct JVMField {
+    std::string name;
+    std::string signature;
+    uint32_t    offset;
+    uint16_t    accessFlags;
+    bool        isStatic;
+};
+
+struct JVMClass {
+    std::string name;
+    uint64_t    klassAddr;
+    int         instanceSize;
+    std::string superName;
+    std::vector<JVMField> fields;
+};
+
+static std::string ReadRemoteString(HANDLE hProc, uint64_t addr, int maxLen = 256) {
+    if (!addr || addr < 0x10000) return "";
+    char buf[512]{};
+    int toRead = (maxLen < 512) ? maxLen : 511;
+    SIZE_T bytesRead = 0;
+    if (!ReadProcessMemory(hProc, (LPCVOID)addr, buf, toRead, &bytesRead))
+        return "";
+    buf[bytesRead] = 0;
+    for (int i = 0; buf[i]; i++) {
+        if ((unsigned char)buf[i] < 0x20 && buf[i] != '\0')
+            buf[i] = '?';
+    }
+    return std::string(buf);
+}
+
+template<typename T>
+static T RPM(HANDLE hProc, uint64_t addr) {
+    T val{};
+    ReadProcessMemory(hProc, (LPCVOID)addr, &val, sizeof(T), nullptr);
+    return val;
+}
+
+static uint64_t FindJVMExport(HANDLE hProc, const std::vector<ModuleInfo>& modules,
+                               const char* exportName) {
+    for (auto& m : modules) {
+        if (!ContainsCI(m.name, "jvm.dll")) continue;
+        IMAGE_DOS_HEADER dos{};
+        ReadProcessMemory(hProc, (LPCVOID)m.base, &dos, sizeof(dos), nullptr);
+        if (dos.e_magic != IMAGE_DOS_SIGNATURE) continue;
+        IMAGE_NT_HEADERS64 nt{};
+        ReadProcessMemory(hProc, (LPCVOID)(m.base + dos.e_lfanew), &nt, sizeof(nt), nullptr);
+        if (nt.Signature != IMAGE_NT_SIGNATURE) continue;
+        auto& expDir = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+        if (!expDir.VirtualAddress || !expDir.Size) continue;
+        IMAGE_EXPORT_DIRECTORY exp{};
+        ReadProcessMemory(hProc, (LPCVOID)(m.base + expDir.VirtualAddress), &exp, sizeof(exp), nullptr);
+        uint32_t numNames = exp.NumberOfNames;
+        if (numNames == 0 || numNames > 50000) continue;
+        std::vector<uint32_t> nameRVAs(numNames);
+        std::vector<uint16_t> ordinals(numNames);
+        std::vector<uint32_t> funcRVAs(exp.NumberOfFunctions);
+        ReadProcessMemory(hProc, (LPCVOID)(m.base + exp.AddressOfNames),
+                          nameRVAs.data(), numNames * 4, nullptr);
+        ReadProcessMemory(hProc, (LPCVOID)(m.base + exp.AddressOfNameOrdinals),
+                          ordinals.data(), numNames * 2, nullptr);
+        ReadProcessMemory(hProc, (LPCVOID)(m.base + exp.AddressOfFunctions),
+                          funcRVAs.data(), exp.NumberOfFunctions * 4, nullptr);
+        for (uint32_t i = 0; i < numNames; i++) {
+            char name[128]{};
+            ReadProcessMemory(hProc, (LPCVOID)(m.base + nameRVAs[i]), name, 127, nullptr);
+            if (strcmp(name, exportName) == 0) {
+                uint16_t ord = ordinals[i];
+                if (ord < exp.NumberOfFunctions)
+                    return m.base + funcRVAs[ord];
+            }
+        }
+    }
+    return 0;
+}
+
+static JVMLayout ParseVMStructs(HANDLE hProc, uint64_t vmStructsAddr) {
+    JVMLayout layout{};
+    memset(&layout, 0, sizeof(layout));
+    uint64_t tableAddr = RPM<uint64_t>(hProc, vmStructsAddr);
+    if (!tableAddr) {
+        printf("    [-] gHotSpotVMStructs pointer is null\n");
+        return layout;
+    }
+    printf("    [*] VMStructs table @ 0x%llX\n", (unsigned long long)tableAddr);
+    int count = 0;
+    for (int i = 0; i < 5000; i++) {
+        VMStructEntry entry{};
+        ReadProcessMemory(hProc, (LPCVOID)(tableAddr + i * sizeof(VMStructEntry)),
+                          &entry, sizeof(entry), nullptr);
+        if (!entry.typeName) break;
+        std::string type = ReadRemoteString(hProc, entry.typeName);
+        std::string field = ReadRemoteString(hProc, entry.fieldName);
+        if (type.empty()) break;
+        count++;
+        if (type == "Universe") {
+            if (field == "_narrow_klass._base" && entry.isStatic)
+                layout.Universe_narrowKlass_base = entry.address;
+            else if (field == "_narrow_klass._shift" && entry.isStatic)
+                layout.Universe_narrowKlass_shift = entry.address;
+            else if (field == "_collectedHeap" && entry.isStatic)
+                layout.Universe_collectedHeap = entry.address;
+        } else if (type == "ClassLoaderDataGraph") {
+            if (field == "_head" && entry.isStatic)
+                layout.CLDG_head = entry.address;
+        } else if (type == "ClassLoaderData") {
+            if (field == "_next" && !entry.isStatic)
+                layout.CLD_next = (int32_t)entry.offset;
+            else if (field == "_klasses" && !entry.isStatic)
+                layout.CLD_klasses = (int32_t)entry.offset;
+        } else if (type == "Klass") {
+            if (field == "_name" && !entry.isStatic)
+                layout.Klass_name = (int32_t)entry.offset;
+            else if (field == "_next_link" && !entry.isStatic)
+                layout.Klass_nextLink = (int32_t)entry.offset;
+            else if (field == "_layout_helper" && !entry.isStatic)
+                layout.Klass_layoutHelper = (int32_t)entry.offset;
+            else if (field == "_super" && !entry.isStatic)
+                layout.Klass_superKlass = (int32_t)entry.offset;
+        } else if (type == "InstanceKlass") {
+            if (field == "_fields" && !entry.isStatic)
+                layout.IK_fields = (int32_t)entry.offset;
+            else if (field == "_constants" && !entry.isStatic)
+                layout.IK_constants = (int32_t)entry.offset;
+            else if (field == "_java_fields_count" && !entry.isStatic)
+                layout.IK_javaFieldsCount = (int32_t)entry.offset;
+            else if (field == "_source_file_name_index" && !entry.isStatic)
+                layout.IK_sourceFileName = (int32_t)entry.offset;
+        } else if (type == "Symbol") {
+            if (field == "_length" && !entry.isStatic)
+                layout.Symbol_length = (int32_t)entry.offset;
+            else if (field == "_body" && !entry.isStatic)
+                layout.Symbol_body = (int32_t)entry.offset;
+        } else if (type == "ConstantPool") {
+            if (field == "_pool_holder" && !entry.isStatic)
+                layout.CP_poolHolder = (int32_t)entry.offset;
+            else if (field == "_length" && !entry.isStatic)
+                layout.CP_length = (int32_t)entry.offset;
+        }
+    }
+    printf("    [*] Parsed %d VMStruct entries\n", count);
+    layout.valid = (layout.CLDG_head != 0 && layout.CLD_klasses != 0 &&
+                    layout.Klass_name != 0 && layout.Symbol_body != 0);
+    if (layout.valid) {
+        printf("    [+] JVM layout resolved:\n");
+        printf("      CLDG._head       @ 0x%llX\n", (unsigned long long)layout.CLDG_head);
+        printf("      CLD._next        = +0x%X\n", layout.CLD_next);
+        printf("      CLD._klasses     = +0x%X\n", layout.CLD_klasses);
+        printf("      Klass._name      = +0x%X\n", layout.Klass_name);
+        printf("      Klass._next_link = +0x%X\n", layout.Klass_nextLink);
+        printf("      Klass._super     = +0x%X\n", layout.Klass_superKlass);
+        printf("      IK._fields       = +0x%X\n", layout.IK_fields);
+        printf("      IK._constants    = +0x%X\n", layout.IK_constants);
+        printf("      IK._java_fields_count = +0x%X\n", layout.IK_javaFieldsCount);
+        printf("      Symbol._length   = +0x%X\n", layout.Symbol_length);
+        printf("      Symbol._body     = +0x%X\n", layout.Symbol_body);
+        if (layout.Universe_narrowKlass_base)
+            printf("      narrowKlass.base @ 0x%llX\n", (unsigned long long)layout.Universe_narrowKlass_base);
+    } else {
+        printf("    [-] Missing critical JVM layout fields\n");
+    }
+    return layout;
+}
+
+static std::string ReadJVMSymbol(HANDLE hProc, uint64_t symbolAddr, const JVMLayout& jvm) {
+    if (!symbolAddr || symbolAddr < 0x10000) return "";
+    uint16_t len = RPM<uint16_t>(hProc, symbolAddr + jvm.Symbol_length);
+    if (len == 0 || len > 1024) return "";
+    std::vector<char> buf(len + 1, 0);
+    ReadProcessMemory(hProc, (LPCVOID)(symbolAddr + jvm.Symbol_body), buf.data(), len, nullptr);
+    return std::string(buf.data(), len);
+}
+
+static std::vector<JVMField> ReadKlassFields(HANDLE hProc, uint64_t klassAddr,
+                                               const JVMLayout& jvm) {
+    std::vector<JVMField> fields;
+    int fieldCount = RPM<uint16_t>(hProc, klassAddr + jvm.IK_javaFieldsCount);
+    if (fieldCount <= 0 || fieldCount > 500) return fields;
+    uint64_t fieldsArray = RPM<uint64_t>(hProc, klassAddr + jvm.IK_fields);
+    if (!fieldsArray) return fields;
+    uint64_t dataStart = fieldsArray + 16; // Array<u2> header
+    uint64_t cpAddr = RPM<uint64_t>(hProc, klassAddr + jvm.IK_constants);
+    for (int i = 0; i < fieldCount; i++) {
+        uint16_t info[6]{};
+        ReadProcessMemory(hProc, (LPCVOID)(dataStart + i * 12), info, 12, nullptr);
+        JVMField f;
+        f.accessFlags = info[0];
+        f.isStatic = (info[0] & 0x0008) != 0;
+        f.offset = ((uint32_t)info[5] << 16) | info[4];
+        if (cpAddr) {
+            uint16_t nameIdx = info[1];
+            uint16_t sigIdx  = info[2];
+            for (int hdrSize : {0x30, 0x38, 0x40, 0x48}) {
+                uint64_t nameSymbol = RPM<uint64_t>(hProc, cpAddr + hdrSize + nameIdx * 8);
+                if (nameSymbol > 0x10000 && nameSymbol < 0x7FFFFFFFFFFF) {
+                    std::string name = ReadJVMSymbol(hProc, nameSymbol, jvm);
+                    if (!name.empty() && name[0] >= 'A' && name[0] <= 'z') {
+                        f.name = name;
+                        uint64_t sigSymbol = RPM<uint64_t>(hProc, cpAddr + hdrSize + sigIdx * 8);
+                        f.signature = ReadJVMSymbol(hProc, sigSymbol, jvm);
+                        break;
+                    }
+                }
+            }
+        }
+        if (f.name.empty()) {
+            char tmp[32];
+            snprintf(tmp, sizeof(tmp), "field_%d", i);
+            f.name = tmp;
+        }
+        fields.push_back(f);
+    }
+    return fields;
+}
+
+static std::vector<JVMClass> EnumerateJVMClasses(HANDLE hProc, const JVMLayout& jvm,
+                                                   const std::vector<std::string>& classFilters) {
+    std::vector<JVMClass> results;
+    uint64_t cldHead = RPM<uint64_t>(hProc, jvm.CLDG_head);
+    if (!cldHead) {
+        printf("    [-] ClassLoaderDataGraph._head is null\n");
+        return results;
+    }
+    printf("    [*] Walking ClassLoaderData chain from 0x%llX...\n", (unsigned long long)cldHead);
+    int cldCount = 0, klassCount = 0;
+    uint64_t cld = cldHead;
+    std::map<std::string, int> classIndex;
+    while (cld && cld > 0x10000 && cldCount < 200) {
+        cldCount++;
+        uint64_t klass = RPM<uint64_t>(hProc, cld + jvm.CLD_klasses);
+        int klassInCLD = 0;
+        while (klass && klass > 0x10000 && klassInCLD < 50000) {
+            klassInCLD++;
+            klassCount++;
+            uint64_t nameSymbol = RPM<uint64_t>(hProc, klass + jvm.Klass_name);
+            std::string className = ReadJVMSymbol(hProc, nameSymbol, jvm);
+            bool match = classFilters.empty();
+            if (!match) {
+                for (auto& filter : classFilters) {
+                    if (ContainsCI(className.c_str(), filter.c_str())) {
+                        match = true;
+                        break;
+                    }
+                }
+            }
+            if (match && !className.empty() && classIndex.find(className) == classIndex.end()) {
+                JVMClass jc;
+                jc.name = className;
+                jc.klassAddr = klass;
+                if (jvm.Klass_layoutHelper) {
+                    int32_t lh = RPM<int32_t>(hProc, klass + jvm.Klass_layoutHelper);
+                    if (lh > 0 && lh < 0x100000) jc.instanceSize = lh;
+                }
+                if (jvm.Klass_superKlass) {
+                    uint64_t superK = RPM<uint64_t>(hProc, klass + jvm.Klass_superKlass);
+                    if (superK) {
+                        uint64_t superNameSym = RPM<uint64_t>(hProc, superK + jvm.Klass_name);
+                        jc.superName = ReadJVMSymbol(hProc, superNameSym, jvm);
+                    }
+                }
+                if (jvm.IK_fields && jvm.IK_javaFieldsCount)
+                    jc.fields = ReadKlassFields(hProc, klass, jvm);
+                classIndex[className] = (int)results.size();
+                results.push_back(jc);
+            }
+            if (jvm.Klass_nextLink)
+                klass = RPM<uint64_t>(hProc, klass + jvm.Klass_nextLink);
+            else
+                break;
+        }
+        cld = RPM<uint64_t>(hProc, cld + jvm.CLD_next);
+    }
+    printf("    [*] Walked %d ClassLoaderDatas, %d total classes, %zu matched filters\n",
+           cldCount, klassCount, results.size());
+    return results;
+}
+
+static std::vector<std::string> GetJVMGameFilters(const char* gameName) {
+    if (ContainsCI(gameName, "STALZONE") || ContainsCI(gameName, "stalcraft")) {
+        return {
+            "Player", "Entity", "Character", "Actor",
+            "World", "Map", "Level", "Zone",
+            "Camera", "View", "Screen",
+            "Inventory", "Item", "Weapon", "Armor",
+            "Health", "Stats", "Position", "Transform",
+            "Network", "Client", "Server", "Session",
+            "Game", "Manager", "Controller",
+            "com/badlogic/gdx",
+            "ApplicationListener", "Stage",
+            "Vector2", "Vector3", "Matrix4",
+            "SpriteBatch", "OrthographicCamera",
+        };
+    }
+    return {
+        "Player", "Entity", "World", "Camera", "Game",
+        "Manager", "Controller", "Network",
+        "Vector", "Transform", "Position",
+        "Health", "Inventory", "Weapon",
+    };
+}
+
+static void WriteJVMClassDump(const char* path, const std::vector<JVMClass>& classes,
+                               const JVMLayout& jvm, const char* gameName) {
+    FILE* f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "; JVM Class Dump for %s\n", gameName);
+    fprintf(f, "; Generated by dumper2 JVM analysis\n");
+    fprintf(f, "; Use these field offsets for DMA reads\n\n");
+    fprintf(f, "[JVMConfig]\n");
+    if (jvm.Universe_narrowKlass_base)
+        fprintf(f, "NarrowKlassBase_Addr=0x%llX\n", (unsigned long long)jvm.Universe_narrowKlass_base);
+    if (jvm.Universe_narrowKlass_shift)
+        fprintf(f, "NarrowKlassShift_Addr=0x%llX\n", (unsigned long long)jvm.Universe_narrowKlass_shift);
+    fprintf(f, "\n");
+    for (auto& c : classes) {
+        std::string secName = c.name;
+        for (auto& ch : secName) { if (ch == '/') ch = '.'; }
+        fprintf(f, "[%s]\n", secName.c_str());
+        fprintf(f, "KlassAddr=0x%llX\n", (unsigned long long)c.klassAddr);
+        if (c.instanceSize > 0)
+            fprintf(f, "InstanceSize=%d\n", c.instanceSize);
+        if (!c.superName.empty())
+            fprintf(f, "Super=%s\n", c.superName.c_str());
+        for (auto& field : c.fields) {
+            if (field.isStatic) continue;
+            fprintf(f, "%s=0x%X", field.name.c_str(), field.offset);
+            if (!field.signature.empty())
+                fprintf(f, " ; %s", field.signature.c_str());
+            fprintf(f, "\n");
+        }
+        fprintf(f, "\n");
+    }
+    fclose(f);
+    printf("[+] JVM class dump written: %s\n", path);
+}
+
+static bool AnalyzeJVMGame(HANDLE hProc, const std::vector<ModuleInfo>& modules,
+                            const char* gameName) {
+    printf("\n[*] --- JVM Analysis (%s) ---\n", gameName);
+    bool hasJVM = false;
+    for (auto& m : modules) {
+        if (ContainsCI(m.name, "jvm.dll")) { hasJVM = true; break; }
+    }
+    if (!hasJVM) {
+        printf("    [-] jvm.dll not found — not a Java game\n");
+        return false;
+    }
+    printf("    [+] jvm.dll found — Java/JVM game detected\n");
+    uint64_t vmStructsAddr = FindJVMExport(hProc, modules, "gHotSpotVMStructs");
+    if (!vmStructsAddr) {
+        printf("    [-] gHotSpotVMStructs export not found in jvm.dll\n");
+        return false;
+    }
+    printf("    [+] gHotSpotVMStructs @ 0x%llX\n", (unsigned long long)vmStructsAddr);
+    JVMLayout jvm = ParseVMStructs(hProc, vmStructsAddr);
+    if (!jvm.valid) {
+        printf("    [-] Failed to resolve JVM internal layout\n");
+        return false;
+    }
+    if (jvm.Universe_narrowKlass_base) {
+        uint64_t nkBase = RPM<uint64_t>(hProc, jvm.Universe_narrowKlass_base);
+        int32_t  nkShift = jvm.Universe_narrowKlass_shift ?
+                           RPM<int32_t>(hProc, jvm.Universe_narrowKlass_shift) : 3;
+        printf("    [*] NarrowKlass: base=0x%llX shift=%d\n",
+               (unsigned long long)nkBase, nkShift);
+    }
+    auto filters = GetJVMGameFilters(gameName);
+    printf("    [*] Searching for %zu class name patterns\n", filters.size());
+    auto classes = EnumerateJVMClasses(hProc, jvm, filters);
+    if (classes.empty()) {
+        printf("    [-] No matching classes found\n");
+        return false;
+    }
+    printf("\n    [+] Found %zu game-relevant classes:\n", classes.size());
+    for (auto& c : classes) {
+        std::string displayName = c.name;
+        for (auto& ch : displayName) { if (ch == '/') ch = '.'; }
+        printf("      %-60s  Klass=0x%llX  size=%d  fields=%zu\n",
+               displayName.c_str(), (unsigned long long)c.klassAddr,
+               c.instanceSize, c.fields.size());
+        for (auto& fld : c.fields) {
+            if (fld.isStatic) continue;
+            printf("        +0x%-4X %-30s %s\n", fld.offset, fld.name.c_str(), fld.signature.c_str());
+        }
+    }
+    std::string outFile = std::string(gameName) + "_jvm_classes.ini";
+    WriteJVMClassDump(outFile.c_str(), classes, jvm, gameName);
+    return true;
+}
+
 // ── Auto-Detect Running Games ───────────────────────────────────────────────────
 
 struct DetectedGame {
@@ -2204,6 +2633,20 @@ int main(int argc, char* argv[]) {
                         dumpedFiles.push_back(iniName);
                     } else {
                         printf("    (no manager candidates found)\n");
+                    }
+                }
+            }
+
+            // JVM analysis for Java/libGDX games (Stalcraft, etc.)
+            if (g_hProc) {
+                bool hasJVM = false;
+                for (auto& m : modules) {
+                    if (ContainsCI(m.name, "jvm.dll")) { hasJVM = true; break; }
+                }
+                if (hasJVM) {
+                    if (AnalyzeJVMGame(g_hProc, modules, procName.c_str())) {
+                        std::string jvmIni = procName + "_jvm_classes.ini";
+                        dumpedFiles.push_back(jvmIni);
                     }
                 }
             }
