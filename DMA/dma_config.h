@@ -49,4 +49,12 @@ namespace Config
 
 	inline bool lootTeleport = false;
 	inline float lootRadius = 50.0f;
+
+	inline bool noclip = false;
+	inline float noclipSpeed = 5.0f;
+	inline bool infiniteStats = false;
+	inline bool noDebuffs = false;
+	inline bool alwaysGPS = false;
+	inline bool alwaysCompass = false;
+	inline bool teleport = false;
 }

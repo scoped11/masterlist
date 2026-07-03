@@ -167,6 +167,11 @@ namespace Offsets
 	extern uintptr_t ll_vision;
 	extern uintptr_t os_cachedVerticalFOV;
 
+	extern uintptr_t pm_controller;
+	extern uintptr_t pm_gps;
+	extern uintptr_t pm_compass;
+	extern uintptr_t pl_stunDuration;
+
 	void init();
 }
 

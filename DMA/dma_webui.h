@@ -187,11 +187,13 @@ R"RAWHTML(
 <div class="item" data-k="superJump"><span class="item-name">Super Jump</span><div class="sw"></div></div>
 <div class="item" data-k="vehicleFly"><span class="item-name">Vehicle Fly</span><div class="sw"></div></div>
 <div class="item" data-k="noFallDamage"><span class="item-name">No Fall Dmg</span><div class="sw"></div></div>
+<div class="item" data-k="noclip"><span class="item-name">Noclip</span><div class="sw"></div></div>
 </div>
 <div class="sliders">
 <div class="srow"><span class="slbl">SPEED</span><input type="range" min="1" max="1.5" step="0.1" data-k="speedMultiplier"><span class="sval" id="v_speedMultiplier">1.3</span></div>
 <div class="srow"><span class="slbl">JUMP</span><input type="range" min="1" max="2" step="0.1" data-k="jumpMultiplier"><span class="sval" id="v_jumpMultiplier">1.5</span></div>
 <div class="srow"><span class="slbl">FLY SPD</span><input type="range" min="2" max="15" step="1" data-k="flySpeed"><span class="sval" id="v_flySpeed">8</span></div>
+<div class="srow"><span class="slbl">NOCLIP SPD</span><input type="range" min="1" max="15" step="0.5" data-k="noclipSpeed"><span class="sval" id="v_noclipSpeed">5</span></div>
 </div>
 </div>
 
@@ -267,6 +269,10 @@ R"RAWHTML(
 <div class="grid">
 <div class="item" data-k="godMode"><span class="item-name">God Mode</span><div class="sw"></div></div>
 <div class="item" data-k="adminMode"><span class="item-name">Admin Mode</span><div class="sw"></div></div>
+<div class="item" data-k="infiniteStats"><span class="item-name">Infinite Stats</span><div class="sw"></div></div>
+<div class="item" data-k="noDebuffs"><span class="item-name">No Debuffs</span><div class="sw"></div></div>
+<div class="item" data-k="alwaysGPS"><span class="item-name">Always GPS</span><div class="sw"></div></div>
+<div class="item" data-k="alwaysCompass"><span class="item-name">Always Compass</span><div class="sw"></div></div>
 </div>
 </div>
 

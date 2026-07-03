@@ -175,6 +175,11 @@ namespace Offsets
 	uintptr_t ll_vision;
 	uintptr_t os_cachedVerticalFOV;
 
+	uintptr_t pm_controller;
+	uintptr_t pm_gps;
+	uintptr_t pm_compass;
+	uintptr_t pl_stunDuration;
+
 	void init()
 	{
 		_localPlayer = safe_offset(Classes::Player, "_localPlayer");
@@ -258,6 +263,15 @@ namespace Offsets
 		if (!totalGravityMultiplier) totalGravityMultiplier = safe_offset(Classes::PlayerMovement, "<totalGravityMultiplier>k__BackingField");
 		Log("  _isGrounded: %s  totalSpeedMul: %s  totalGravMul: %s",
 			_isGrounded ? "OK" : "--", totalSpeedMultiplier ? "OK" : "--", totalGravityMultiplier ? "OK" : "--");
+
+		pm_controller = safe_offset(Classes::PlayerMovement, "controller");
+		if (!pm_controller) pm_controller = safe_offset(Classes::PlayerMovement, "_controller");
+		pm_gps = safe_offset(Classes::PlayerMovement, "gps");
+		if (!pm_gps) pm_gps = safe_offset(Classes::PlayerMovement, "_gps");
+		pm_compass = safe_offset(Classes::PlayerMovement, "compass");
+		if (!pm_compass) pm_compass = safe_offset(Classes::PlayerMovement, "_compass");
+		pl_stunDuration = safe_offset(Classes::PlayerLife, "_stunDuration");
+		if (!pl_stunDuration) pl_stunDuration = safe_offset(Classes::PlayerLife, "stunDuration");
 
 		_yaw = safe_offset(Classes::PlayerLook, "_yaw");
 		if (!_yaw) _yaw = safe_offset(Classes::PlayerLook, "yaw");

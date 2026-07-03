@@ -332,14 +332,21 @@ namespace Overlay
 		wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 		RegisterClassExA(&wc);
 
+		DWORD exStyle = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
+		if (!Config::streamProof)
+			exStyle |= WS_EX_TOPMOST;
+
 		overlayWnd = CreateWindowExA(
-			WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+			exStyle,
 			"CoopyyDMAOverlay", "",
 			WS_POPUP,
 			0, 0, screenW, screenH,
 			NULL, NULL, GetModuleHandle(NULL), NULL);
 
 		if (!overlayWnd) return;
+
+		if (Config::streamProof)
+			SetWindowDisplayAffinity(overlayWnd, WDA_EXCLUDEFROMCAPTURE);
 
 		SetLayeredWindowAttributes(overlayWnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
 		ShowWindow(overlayWnd, SW_SHOWNOACTIVATE);
@@ -365,6 +372,9 @@ namespace Overlay
 				TranslateMessage(&msg);
 				DispatchMessageA(&msg);
 			}
+
+			if (Config::streamProof)
+				SetWindowPos(overlayWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
 			HDC hdc = GetDC(overlayWnd);
 			HDC memDC = CreateCompatibleDC(hdc);

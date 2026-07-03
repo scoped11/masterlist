@@ -55,6 +55,11 @@ namespace WebServer
 		{"espDistance",    &Config::espDistance},
 		{"espHealth",     &Config::espHealth},
 		{"espSnaplines",  &Config::espSnaplines},
+		{"noclip",        &Config::noclip},
+		{"infiniteStats", &Config::infiniteStats},
+		{"noDebuffs",     &Config::noDebuffs},
+		{"alwaysGPS",     &Config::alwaysGPS},
+		{"alwaysCompass",  &Config::alwaysCompass},
 	};
 
 	inline FloatBinding floatMap[] = {
@@ -66,6 +71,7 @@ namespace WebServer
 		{"customFOV",       &Config::customFOV,        60.0f, 160.0f},
 		{"meleeRange",      &Config::meleeRange,       1.0f, 50.0f},
 		{"lootRadius",      &Config::lootRadius,       5.0f, 200.0f},
+		{"noclipSpeed",     &Config::noclipSpeed,      1.0f, 15.0f},
 	};
 
 	inline void SendResponse(SOCKET s, int code, const char* contentType, const char* body, int bodyLen)
