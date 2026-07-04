@@ -1,7 +1,9 @@
 // esp_client.exe — External ESP overlay for PC1
-// Connects to CoopyyDMA web API on PC2 and renders ESP over Unturned's window
-// Usage: esp_client.exe [server_ip] [port]
-//   Default: esp_client.exe 192.168.1.211 9222
+// Connects to CoopyyDMA web API on PC2 and renders ESP over game window
+// Usage: esp_client.exe [server_ip] [port] [game]
+//   Default: esp_client.exe 192.168.1.211 9222 unturned
+//   Rust:    esp_client.exe 192.168.1.211 8888 rust
+//   Game names: unturned, rust (auto-detects window title)
 // Build: cl /EHsc /O2 /std:c++17 esp_client.cpp /link ws2_32.lib user32.lib gdi32.lib /OUT:RuntimeBroker.exe
 
 #include <winsock2.h>
@@ -932,8 +934,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 	return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
+static char g_gameName[64] = "unturned";
+
 static HWND FindGameWindow()
 {
+	if (_stricmp(g_gameName, "rust") == 0) {
+		HWND hw = FindWindowA(NULL, "Rust");
+		if (!hw) hw = FindWindowA("UnityWndClass", "Rust");
+		return hw;
+	}
 	HWND hw = FindWindowA(NULL, "Unturned");
 	if (!hw) hw = FindWindowA("UnityWndClass", NULL);
 	return hw;
@@ -947,6 +956,7 @@ int main(int argc, char* argv[])
 
 	if (argc >= 2) strncpy_s(g_serverIP, argv[1], sizeof(g_serverIP) - 1);
 	if (argc >= 3) g_serverPort = atoi(argv[2]);
+	if (argc >= 4) strncpy_s(g_gameName, argv[3], sizeof(g_gameName) - 1);
 
 	initRuntimeStrings();
 	respawnUnderSvchost();
