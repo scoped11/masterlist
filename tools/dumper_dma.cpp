@@ -364,6 +364,49 @@ static const GameDef KnownGames[] = {
     {nullptr, nullptr, ENGINE_UNKNOWN, nullptr}
 };
 
+// ── Game alias lookup ─────────────────────────────────────────────────────────
+
+static std::string GetGameAlias(const char* procName) {
+    for (int i = 0; KnownGames[i].alias; i++) {
+        if (_stricmp(procName, KnownGames[i].processName) == 0)
+            return KnownGames[i].alias;
+    }
+    std::string name = procName;
+    auto dot = name.rfind('.');
+    if (dot != std::string::npos) name = name.substr(0, dot);
+    for (auto& c : name) c = (char)tolower((unsigned char)c);
+    return name;
+}
+
+static void CopyToMasterlist(const std::string& iniPath, const std::string& alias) {
+    const char* searchPaths[] = {
+        "cheat\\dma",
+        "..\\cheat\\dma",
+        "..\\..\\cheat\\dma",
+        "..\\..\\..\\cheat\\dma",
+    };
+    char desktop[MAX_PATH] = {};
+    SHGetFolderPathA(NULL, CSIDL_DESKTOPDIRECTORY, NULL, 0, desktop);
+
+    std::vector<std::string> candidates;
+    for (auto& rel : searchPaths) candidates.push_back(std::string(rel));
+    candidates.push_back(std::string(desktop) + "\\Here\\masterlist\\cheat\\dma");
+    candidates.push_back(std::string(desktop) + "\\MASTER\\cheat\\dma");
+    candidates.push_back(std::string(desktop) + "\\masterlist\\cheat\\dma");
+
+    for (auto& dir : candidates) {
+        DWORD attr = GetFileAttributesA(dir.c_str());
+        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            std::string dest = dir + "\\" + alias + "_offsets.ini";
+            if (CopyFileA(iniPath.c_str(), dest.c_str(), FALSE)) {
+                printf("[+] Copied to masterlist: %s\n", dest.c_str());
+                return;
+            }
+        }
+    }
+    printf("[*] Masterlist cheat/dma/ not found locally — push %s_offsets.ini manually\n", alias.c_str());
+}
+
 // ── Interactive process selection ──────────────────────────────────────────────
 
 struct ProcessEntry {
@@ -694,7 +737,8 @@ static bool DumpUEOffsets(const char* procName, uint64_t modBase, bool isUE5, co
     if (!gobjectsPtr) printf("[!] GObjects not found\n");
 
     // === Write output ===
-    std::string filePath = outDir + "\\offsets.h";
+    std::string gameAlias_h = GetGameAlias(procName);
+    std::string filePath = outDir + "\\" + gameAlias_h + "_offsets.h";
     FILE* f = fopen(filePath.c_str(), "w");
     if (!f) { printf("[-] Failed to create %s\n", filePath.c_str()); return false; }
 
@@ -928,13 +972,14 @@ static bool DumpUEOffsets(const char* procName, uint64_t modBase, bool isUE5, co
 
     fclose(f);
 
-    // INI file
-    std::string iniPath = outDir + "\\offsets.ini";
+    // INI file — named <alias>_offsets.ini so cheats can auto-fetch by game name
+    std::string gameAlias = GetGameAlias(procName);
+    std::string iniPath = outDir + "\\" + gameAlias + "_offsets.ini";
     FILE* ini = fopen(iniPath.c_str(), "w");
     if (ini) {
         fprintf(ini, "# %s — Auto-generated Offsets\n", procName);
         fprintf(ini, "# Date: %s\n# Engine: %s\n\n", date, isUE5 ? "UE5" : "UE4");
-        fprintf(ini, "[Identity]\nProcessName=%s\nEngine=%s\n\n", procName, isUE5 ? "ue5" : "ue4");
+        fprintf(ini, "[Identity]\nGameName=%s\nProcessName=%s\nEngine=%s\n\n", gameAlias.c_str(), procName, isUE5 ? "ue5" : "ue4");
         fprintf(ini, "[Globals]\nGWorld=0x%llX\nGNames=0x%llX\nGObjects=0x%llX\n\n",
             (unsigned long long)(gworldPtr ? gworldPtr - modBase : 0),
             (unsigned long long)(gnamesPtr ? gnamesPtr - modBase : 0),
@@ -950,6 +995,7 @@ static bool DumpUEOffsets(const char* procName, uint64_t modBase, bool isUE5, co
         fprintf(ini, "[USkeletalMeshComponent]\nBoneArray=0x%X\n\n", boneArrayOff);
         fclose(ini);
         printf("[+] INI: %s\n", iniPath.c_str());
+        CopyToMasterlist(iniPath, gameAlias);
     }
 
     printf("[+] Offsets: %s\n", filePath.c_str());
@@ -1449,7 +1495,8 @@ static bool DumpIL2CPPOffsets(const char* procName, const std::string& outDir) {
     }
 
     // ── Phase 4: Write output ──
-    std::string filePath = outDir + "\\offsets.h";
+    std::string gameAlias_h = GetGameAlias(procName);
+    std::string filePath = outDir + "\\" + gameAlias_h + "_offsets.h";
     FILE* f = fopen(filePath.c_str(), "w");
     if (!f) return false;
 
@@ -1646,14 +1693,16 @@ static bool DumpIL2CPPOffsets(const char* procName, const std::string& outDir) {
     fclose(f);
     printf("[+] IL2CPP offsets: %s\n", filePath.c_str());
 
-    // Also write INI
+    // Write INI — named <alias>_offsets.ini so cheats can auto-fetch by game name
     if (!runtimeClasses.empty()) {
-        std::string iniPath = outDir + "\\offsets.ini";
+        std::string gameAlias = GetGameAlias(procName);
+        std::string iniPath = outDir + "\\" + gameAlias + "_offsets.ini";
         FILE* ini = fopen(iniPath.c_str(), "w");
         if (ini) {
             fprintf(ini, "# %s — IL2CPP Runtime Offsets\n", procName);
             fprintf(ini, "# Date: %s\n# Engine: Unity (IL2CPP)\n\n", date);
-            fprintf(ini, "[Identity]\nProcessName=%s\nEngine=il2cpp\n\n", procName);
+            fprintf(ini, "[Identity]\nGameName=%s\nProcessName=%s\nModuleName=GameAssembly.dll\nEngine=il2cpp\n\n",
+                gameAlias.c_str(), procName);
             fprintf(ini, "[Modules]\nGameAssembly=0x%llX\n", (unsigned long long)gaBase);
             if (unityBase) fprintf(ini, "UnityPlayer=0x%llX\n", (unsigned long long)unityBase);
             fprintf(ini, "\n");
@@ -1667,6 +1716,7 @@ static bool DumpIL2CPPOffsets(const char* procName, const std::string& outDir) {
             }
             fclose(ini);
             printf("[+] INI: %s\n", iniPath.c_str());
+            CopyToMasterlist(iniPath, gameAlias);
         }
     }
 
