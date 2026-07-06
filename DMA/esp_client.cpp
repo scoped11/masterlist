@@ -4,13 +4,11 @@
 //   Default: esp_client.exe 192.168.1.211 9222 unturned
 //   Rust:    esp_client.exe 192.168.1.211 8888 rust
 //   Game names: unturned, rust (auto-detects window title)
-// Build: cl /EHsc /O2 /std:c++17 esp_client.cpp /link ws2_32.lib user32.lib gdi32.lib /OUT:RuntimeBroker.exe
+// Build: cl /EHsc /O2 /std:c++17 esp_client.cpp /link ws2_32.lib user32.lib gdi32.lib /OUT:esp_client.exe
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <winternl.h>
-#include <tlhelp32.h>
 #include <string>
 #include <cmath>
 #include <cstdio>
@@ -70,7 +68,7 @@ struct ESPConfig {
 };
 
 struct FullConfig {
-	bool vals[40] = {};
+	bool vals[32] = {};
 	float floats[12] = {};
 };
 
@@ -89,14 +87,13 @@ static const char* g_boolKeys[] = {
 	"esp","espBoxes","espNames","espDistance","espHealth","espSnaplines",
 	"radar","vehicleESP","itemESP","zombieESP","fullbright","fovChanger","chams","streamProof",
 	"speedHack","flyHack","superJump","vehicleFly","noFallDamage","noclip",
-	"godMode","adminMode",
-	"lootFilterGuns","lootFilterMeds","lootFilterGear","lootSilent","lootStaggered"
+	"godMode","adminMode"
 };
 static const int NUM_BOOLS = sizeof(g_boolKeys) / sizeof(g_boolKeys[0]);
 
 static const char* g_floatKeys[] = {
 	"speedMultiplier","jumpMultiplier","flySpeed","aimbotFOV","aimbotSmooth",
-	"customFOV","meleeRange","lootRadius","noclipSpeed","lootDelay","vehicleFlySpeed"
+	"customFOV","meleeRange","lootRadius","noclipSpeed"
 };
 static const int NUM_FLOATS = sizeof(g_floatKeys) / sizeof(g_floatKeys[0]);
 
@@ -143,25 +140,19 @@ static const MenuItem g_menuItems[][12] = {
 		{"Jump",          "jumpMultiplier",true, -1, 1, 1.0f, 2.0f},
 		{"Fly Speed",     "flySpeed",      true, -1, 2, 2.0f, 15.0f},
 		{"Noclip Speed",  "noclipSpeed",   true, -1, 8, 1.0f, 15.0f},
-		{"Veh Fly Spd",   "vehicleFlySpeed",true,-1,10, 1.0f, 10.0f},
+		{0},
 		{0},
 	},
 	{ // Player
 		{"God Mode",      "godMode",       false,30, -1, 0,0},
 		{"Admin Mode",    "adminMode",     false,31, -1, 0,0},
 		{"Loot Teleport", "lootTeleport",  false,-1, -1, 0,0},
-		{"Silent Mode",   "lootSilent",    false,35, -1, 0,0},
-		{"Staggered",     "lootStaggered", false,36, -1, 0,0},
-		{"Filter: Guns",  "lootFilterGuns",false,32, -1, 0,0},
-		{"Filter: Meds",  "lootFilterMeds",false,33, -1, 0,0},
-		{"Filter: Gear",  "lootFilterGear",false,34, -1, 0,0},
 		{"Loot Radius",   "lootRadius",    true, -1, 7, 5.0f, 200.0f},
-		{"Stagger Delay", "lootDelay",     true, -1, 9, 1.0f, 30.0f},
 		{"Melee Range",   "meleeRange",    true, -1, 6, 1.0f, 50.0f},
-		{0},
+		{0},{0},{0},{0},{0},{0},{0},
 	},
 };
-static const int g_menuCounts[] = { 12, 12, 11, 11 };
+static const int g_menuCounts[] = { 12, 12, 10, 5 };
 
 // ============ GLOBALS ============
 
@@ -181,167 +172,6 @@ static bool g_menuOpen = false;
 static int g_activeTab = 0;
 static HFONT g_menuFont = NULL;
 static HFONT g_menuFontBold = NULL;
-static char g_wndClass[16];
-static char g_menuTitle[48];
-static char g_statusOk[32];
-static char g_statusBad[32];
-static wchar_t g_fakePath[48];
-static wchar_t g_fakeCmd[24];
-static wchar_t g_svcName[16];
-
-#pragma optimize("", off)
-static void initRuntimeStrings()
-{
-	unsigned seed = GetTickCount() ^ (unsigned)GetCurrentProcessId();
-	for (int i = 0; i < 10; i++) {
-		seed = seed * 1103515245 + 12345;
-		g_wndClass[i] = 'a' + ((seed >> 16) % 26);
-	}
-	g_wndClass[10] = 0;
-
-	char* p;
-	p = g_menuTitle;
-	*p++='p'; *p++='e'; *p++='n'; *p++='i'; *p++='s'; *p++='f'; *p++='i'; *p++='n'; *p++='g'; *p++='e'; *p++='r';
-	*p++=' '; *p++='D'; *p++='M'; *p++='A';
-	*p++=' '; *p++=' '; *p++='|'; *p++=' '; *p++=' ';
-	*p++='F'; *p++='1'; *p++=' '; *p++='c'; *p++='l'; *p++='o'; *p++='s'; *p++='e';
-	*p = 0;
-
-	p = g_statusOk;
-	*p++='D'; *p++='M'; *p++='A'; *p++=' '; *p++='E'; *p++='S'; *p++='P';
-	*p++=' '; *p++='|'; *p++=' ';
-	*p++='S'; *p++='t'; *p++='r'; *p++='e'; *p++='a'; *p++='m'; *p++='p'; *p++='r'; *p++='o'; *p++='o'; *p++='f';
-	*p = 0;
-
-	p = g_statusBad;
-	*p++='D'; *p++='M'; *p++='A'; *p++=' '; *p++='E'; *p++='S'; *p++='P';
-	*p++=' '; *p++='|'; *p++=' ';
-	*p++='C'; *p++='o'; *p++='n'; *p++='n'; *p++='e'; *p++='c'; *p++='t'; *p++='i'; *p++='n'; *p++='g';
-	*p++='.'; *p++='.'; *p++='.';
-	*p = 0;
-
-	wchar_t* wp;
-	wp = g_fakePath;
-	*wp++='C'; *wp++=':'; *wp++='\\'; *wp++='W'; *wp++='i'; *wp++='n'; *wp++='d'; *wp++='o'; *wp++='w'; *wp++='s';
-	*wp++='\\'; *wp++='S'; *wp++='y'; *wp++='s'; *wp++='t'; *wp++='e'; *wp++='m'; *wp++='3'; *wp++='2';
-	*wp++='\\'; *wp++='R'; *wp++='u'; *wp++='n'; *wp++='t'; *wp++='i'; *wp++='m'; *wp++='e';
-	*wp++='B'; *wp++='r'; *wp++='o'; *wp++='k'; *wp++='e'; *wp++='r'; *wp++='.'; *wp++='e'; *wp++='x'; *wp++='e';
-	*wp = 0;
-
-	wp = g_fakeCmd;
-	*wp++='R'; *wp++='u'; *wp++='n'; *wp++='t'; *wp++='i'; *wp++='m'; *wp++='e';
-	*wp++='B'; *wp++='r'; *wp++='o'; *wp++='k'; *wp++='e'; *wp++='r'; *wp++='.'; *wp++='e'; *wp++='x'; *wp++='e';
-	*wp = 0;
-
-	wp = g_svcName;
-	*wp++='s'; *wp++='v'; *wp++='c'; *wp++='h'; *wp++='o'; *wp++='s'; *wp++='t'; *wp++='.'; *wp++='e'; *wp++='x'; *wp++='e';
-	*wp = 0;
-}
-
-static void masqueradePEB()
-{
-	typedef NTSTATUS(NTAPI* pNtQueryInformationProcess)(HANDLE, ULONG, PVOID, ULONG, PULONG);
-	auto NtQueryInfo = (pNtQueryInformationProcess)GetProcAddress(
-		GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
-	if (!NtQueryInfo) return;
-
-	PROCESS_BASIC_INFORMATION pbi = {};
-	ULONG len = 0;
-	if (NtQueryInfo(GetCurrentProcess(), 0, &pbi, sizeof(pbi), &len) != 0) return;
-
-	PEB* peb = pbi.PebBaseAddress;
-	if (!peb || !peb->ProcessParameters) return;
-
-	peb->ProcessParameters->ImagePathName.Buffer = g_fakePath;
-	peb->ProcessParameters->ImagePathName.Length = (USHORT)(wcslen(g_fakePath) * sizeof(wchar_t));
-	peb->ProcessParameters->ImagePathName.MaximumLength = sizeof(g_fakePath);
-	peb->ProcessParameters->CommandLine.Buffer = g_fakeCmd;
-	peb->ProcessParameters->CommandLine.Length = (USHORT)(wcslen(g_fakeCmd) * sizeof(wchar_t));
-	peb->ProcessParameters->CommandLine.MaximumLength = sizeof(g_fakeCmd);
-}
-
-static void respawnUnderSvchost()
-{
-	DWORD myPid = GetCurrentProcessId();
-	DWORD parentPid = 0;
-
-	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	if (snap == INVALID_HANDLE_VALUE) return;
-
-	PROCESSENTRY32W pe = {};
-	pe.dwSize = sizeof(pe);
-	if (Process32FirstW(snap, &pe)) {
-		do {
-			if (pe.th32ProcessID == myPid) {
-				parentPid = pe.th32ParentProcessID;
-				break;
-			}
-		} while (Process32NextW(snap, &pe));
-	}
-
-	if (parentPid) {
-		pe.dwSize = sizeof(pe);
-		if (Process32FirstW(snap, &pe)) {
-			do {
-				if (pe.th32ProcessID == parentPid &&
-					_wcsicmp(pe.szExeFile, g_svcName) == 0) {
-					CloseHandle(snap);
-					return;
-				}
-			} while (Process32NextW(snap, &pe));
-		}
-	}
-
-	DWORD svcPid = 0;
-	pe.dwSize = sizeof(pe);
-	if (Process32FirstW(snap, &pe)) {
-		do {
-			if (_wcsicmp(pe.szExeFile, g_svcName) == 0) {
-				svcPid = pe.th32ProcessID;
-				break;
-			}
-		} while (Process32NextW(snap, &pe));
-	}
-	CloseHandle(snap);
-
-	if (!svcPid) return;
-
-	HANDLE hParent = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, svcPid);
-	if (!hParent) return;
-
-	SIZE_T attrSize = 0;
-	InitializeProcThreadAttributeList(NULL, 1, 0, &attrSize);
-	auto attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, attrSize);
-	if (!attrs) { CloseHandle(hParent); return; }
-	InitializeProcThreadAttributeList(attrs, 1, 0, &attrSize);
-	UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
-		&hParent, sizeof(hParent), NULL, NULL);
-
-	STARTUPINFOEXA si = {};
-	si.StartupInfo.cb = sizeof(si);
-	si.lpAttributeList = attrs;
-	PROCESS_INFORMATION pi = {};
-
-	char cmdBuf[MAX_PATH * 2];
-	strncpy_s(cmdBuf, GetCommandLineA(), sizeof(cmdBuf) - 1);
-
-	if (CreateProcessA(NULL, cmdBuf, NULL, NULL, FALSE,
-		EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
-		NULL, NULL, &si.StartupInfo, &pi))
-	{
-		CloseHandle(pi.hProcess);
-		CloseHandle(pi.hThread);
-	}
-
-	DeleteProcThreadAttributeList(attrs);
-	HeapFree(GetProcessHeap(), 0, attrs);
-	CloseHandle(hParent);
-	ExitProcess(0);
-}
-#pragma optimize("", on)
-
-static DWORD WINAPI dataWorker(LPVOID) { dataThread(); return 0; }
-static DWORD WINAPI configWorker(LPVOID) { configThread(); return 0; }
 
 // ============ JSON HELPERS ============
 
@@ -391,37 +221,68 @@ static void js(const char* s, const char* k, char* out, int mx)
 
 // ============ HTTP CLIENT ============
 
-static std::string httpGet(const char* path)
+static SOCKET g_persistSock = INVALID_SOCKET;
+
+static SOCKET getConn()
 {
+	if (g_persistSock != INVALID_SOCKET) return g_persistSock;
+
 	SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (s == INVALID_SOCKET) return "";
+	if (s == INVALID_SOCKET) return INVALID_SOCKET;
 
 	sockaddr_in addr = {};
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons((u_short)g_serverPort);
 	inet_pton(AF_INET, g_serverIP, &addr.sin_addr);
 
-	DWORD timeout = 2000;
+	DWORD timeout = 500;
 	setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
 	setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+	int nodelay = 1;
+	setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&nodelay, sizeof(nodelay));
 
 	if (connect(s, (sockaddr*)&addr, sizeof(addr)) != 0) {
 		closesocket(s);
-		return "";
+		return INVALID_SOCKET;
 	}
+	g_persistSock = s;
+	return s;
+}
+
+static void dropConn()
+{
+	if (g_persistSock != INVALID_SOCKET) {
+		closesocket(g_persistSock);
+		g_persistSock = INVALID_SOCKET;
+	}
+}
+
+static std::string httpGet(const char* path)
+{
+	SOCKET s = getConn();
+	if (s == INVALID_SOCKET) return "";
 
 	char req[256];
-	sprintf_s(req, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, g_serverIP);
-	send(s, req, (int)strlen(req), 0);
+	sprintf_s(req, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\n\r\n", path, g_serverIP);
+	if (send(s, req, (int)strlen(req), 0) <= 0) { dropConn(); return ""; }
 
 	std::string resp;
-	char buf[4096];
+	char buf[8192];
 	int n;
 	while ((n = recv(s, buf, sizeof(buf) - 1, 0)) > 0) {
 		buf[n] = 0;
 		resp += buf;
+		if (resp.find("\r\n0\r\n\r\n") != std::string::npos) break;
+		auto hdrEnd = resp.find("\r\n\r\n");
+		if (hdrEnd != std::string::npos) {
+			auto clPos = resp.find("Content-Length:");
+			if (clPos != std::string::npos && clPos < hdrEnd) {
+				int cl = atoi(resp.c_str() + clPos + 15);
+				if ((int)resp.size() >= (int)hdrEnd + 4 + cl) break;
+			}
+		}
 	}
-	closesocket(s);
+	if (n <= 0) { dropConn(); }
 
 	auto bodyPos = resp.find("\r\n\r\n");
 	if (bodyPos == std::string::npos) return "";
@@ -432,8 +293,10 @@ static void httpPost(const char* path)
 {
 	SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (s == INVALID_SOCKET) return;
-	DWORD timeout = 1000;
+	DWORD timeout = 500;
 	setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+	int nodelay = 1;
+	setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&nodelay, sizeof(nodelay));
 	sockaddr_in addr = {};
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons((u_short)g_serverPort);
@@ -841,7 +704,7 @@ static void RenderMenu(HDC hdc, int sw, int sh, const FullConfig& fc)
 	DrawRect(hdc, MENU_X, MENU_Y, MENU_W, menuH, RGB(55, 55, 95));
 
 	HFONT oldFont = (HFONT)SelectObject(hdc, g_menuFontBold);
-	DrawText2(hdc, MENU_X + 10, MENU_Y + 6, g_menuTitle, RGB(100, 170, 255), g_menuFontBold);
+	DrawText2(hdc, MENU_X + 10, MENU_Y + 6, "penisfinger DMA  |  F1 close", RGB(100, 170, 255), g_menuFontBold);
 	DrawLine(hdc, MENU_X, MENU_Y + TITLE_H, MENU_X + MENU_W, MENU_Y + TITLE_H, RGB(55, 55, 95));
 
 	int tabW = MENU_W / TAB_COUNT;
@@ -872,7 +735,7 @@ static void RenderMenu(HDC hdc, int sw, int sh, const FullConfig& fc)
 			FillRect2(hdc, barX, barY, (int)(barW * pct), 4, RGB(100, 170, 255));
 			cy += SLIDER_H;
 		} else {
-			bool on = (mi.boolIdx >= 0 && mi.boolIdx < NUM_BOOLS) ? fc.vals[mi.boolIdx] : false;
+			bool on = (mi.boolIdx >= 0 && mi.boolIdx < 32) ? fc.vals[mi.boolIdx] : false;
 			COLORREF tc = on ? RGB(100, 255, 100) : RGB(150, 60, 60);
 			DrawText2(hdc, MENU_X + 12, cy + 3, mi.label, RGB(200, 200, 210), g_menuFont);
 			const char* state = on ? "ON" : "OFF";
@@ -929,7 +792,6 @@ static void HandleMenuClick(int mx, int my, bool isDown, const FullConfig& fc)
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
-	if (msg == WM_CLOSE) return 0;
 	if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
 	return DefWindowProcA(hwnd, msg, wp, lp);
 }
@@ -958,14 +820,16 @@ int main(int argc, char* argv[])
 	if (argc >= 3) g_serverPort = atoi(argv[2]);
 	if (argc >= 4) strncpy_s(g_gameName, argv[3], sizeof(g_gameName) - 1);
 
-	initRuntimeStrings();
-	respawnUnderSvchost();
-	FreeConsole();
-	masqueradePEB();
+	printf("=== CoopyyDMA ESP Client ===\n");
+	printf("Server: %s:%d\n", g_serverIP, g_serverPort);
+	printf("Game: %s\n", g_gameName);
+	printf("Looking for %s window...\n", g_gameName);
 
 	WSADATA wsa;
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+		printf("WSAStartup failed\n");
 		return 1;
+	}
 
 	g_gameWnd = FindGameWindow();
 	while (!g_gameWnd && g_running) {
@@ -980,24 +844,28 @@ int main(int argc, char* argv[])
 	ClientToScreen(g_gameWnd, &topLeft);
 	int sw = gameRect.right - gameRect.left;
 	int sh = gameRect.bottom - gameRect.top;
+	printf("Found %s: %dx%d at (%d,%d)\n", g_gameName, sw, sh, topLeft.x, topLeft.y);
+
 	WNDCLASSEXA wc = {};
 	wc.cbSize = sizeof(wc);
 	wc.style = CS_HREDRAW | CS_VREDRAW;
 	wc.lpfnWndProc = WndProc;
 	wc.hInstance = GetModuleHandle(NULL);
-	wc.lpszClassName = g_wndClass;
+	wc.lpszClassName = "CoopyyESP";
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 	RegisterClassExA(&wc);
 
 	g_overlay = CreateWindowExA(
-		WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
-		g_wndClass, "",
+		WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+		"CoopyyESP", "",
 		WS_POPUP,
 		topLeft.x, topLeft.y, sw, sh,
 		NULL, NULL, GetModuleHandle(NULL), NULL);
 
-	if (!g_overlay)
+	if (!g_overlay) {
+		printf("Failed to create overlay window\n");
 		return 1;
+	}
 
 	SetLayeredWindowAttributes(g_overlay, RGB(0, 0, 0), 0, LWA_COLORKEY);
 	SetWindowDisplayAffinity(g_overlay, WDA_EXCLUDEFROMCAPTURE);
@@ -1017,8 +885,16 @@ int main(int argc, char* argv[])
 		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
 		CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
 
-	QueueUserWorkItem(dataWorker, NULL, WT_EXECUTELONGFUNCTION);
-	QueueUserWorkItem(configWorker, NULL, WT_EXECUTELONGFUNCTION);
+	printf("Overlay created (stream-proof). Starting data threads...\n");
+
+	std::thread t1(dataThread);
+	std::thread t2(configThread);
+	t1.detach();
+	t2.detach();
+
+	printf("ESP active. Press Ctrl+C to exit.\n\n");
+
+	bool wasConnected = false;
 
 	while (g_running) {
 		MSG msg;
@@ -1029,8 +905,8 @@ int main(int argc, char* argv[])
 		}
 		if (!g_running) break;
 
-		if (GetAsyncKeyState(VK_END) & 0x8000)
-			g_running = false;
+		if (g_connected && !wasConnected) { printf("[+] Connected to DMA server\n"); wasConnected = true; }
+		if (!g_connected && wasConnected) { printf("[-] Lost connection\n"); wasConnected = false; }
 
 		static bool f1WasDown = false;
 		bool f1Down = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
@@ -1098,9 +974,9 @@ int main(int argc, char* argv[])
 		RenderMenu(memDC, sw, sh, localFcfg);
 
 		if (g_connected)
-			DrawText2(memDC, 5, sh - 20, g_statusOk, RGB(0, 255, 100), g_fontSmall);
+			DrawText2(memDC, 5, sh - 20, "DMA ESP | Streamproof", RGB(0, 255, 100), g_fontSmall);
 		else
-			DrawText2(memDC, 5, sh - 20, g_statusBad, RGB(255, 100, 0), g_fontSmall);
+			DrawText2(memDC, 5, sh - 20, "DMA ESP | Connecting...", RGB(255, 100, 0), g_fontSmall);
 
 		BitBlt(hdc, 0, 0, sw, sh, memDC, 0, 0, SRCCOPY);
 
@@ -1117,7 +993,7 @@ int main(int argc, char* argv[])
 	if (g_menuFont) DeleteObject(g_menuFont);
 	if (g_menuFontBold) DeleteObject(g_menuFontBold);
 	if (g_overlay) DestroyWindow(g_overlay);
-	UnregisterClassA(g_wndClass, GetModuleHandle(NULL));
+	UnregisterClassA("CoopyyESP", GetModuleHandle(NULL));
 	WSACleanup();
 	return 0;
 }

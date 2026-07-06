@@ -50,11 +50,6 @@ namespace WebServer
 		{"chams",         &Config::chams},
 		{"streamProof",   &Config::streamProof},
 		{"lootTeleport",  &Config::lootTeleport},
-		{"lootFilterGuns",&Config::lootFilterGuns},
-		{"lootFilterMeds",&Config::lootFilterMeds},
-		{"lootFilterGear",&Config::lootFilterGear},
-		{"lootSilent",    &Config::lootSilent},
-		{"lootStaggered", &Config::lootStaggered},
 		{"espBoxes",      &Config::espBoxes},
 		{"espNames",      &Config::espNames},
 		{"espDistance",    &Config::espDistance},
@@ -75,13 +70,11 @@ namespace WebServer
 		{"aimbotSmooth",    &Config::aimbotSmooth,     1.0f, 20.0f},
 		{"customFOV",       &Config::customFOV,        60.0f, 160.0f},
 		{"meleeRange",      &Config::meleeRange,       1.0f, 50.0f},
-		{"vehicleFlySpeed", &Config::vehicleFlySpeed,   1.0f, 10.0f},
 		{"lootRadius",      &Config::lootRadius,       5.0f, 200.0f},
-		{"lootDelay",       &Config::lootDelay,        1.0f, 30.0f},
 		{"noclipSpeed",     &Config::noclipSpeed,      1.0f, 15.0f},
 	};
 
-	inline void SendResponse(SOCKET s, int code, const char* contentType, const char* body, int bodyLen)
+	inline void SendResponse(SOCKET s, int code, const char* contentType, const char* body, int bodyLen, bool keepAlive = true)
 	{
 		const char* statusText = (code == 200) ? "OK" : (code == 404) ? "Not Found" : "Bad Request";
 		char header[512];
@@ -92,9 +85,9 @@ namespace WebServer
 			"Access-Control-Allow-Origin: *\r\n"
 			"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
 			"Access-Control-Allow-Headers: Content-Type\r\n"
-			"Connection: close\r\n"
+			"Connection: %s\r\n"
 			"\r\n",
-			code, statusText, contentType, bodyLen);
+			code, statusText, contentType, bodyLen, keepAlive ? "keep-alive" : "close");
 		send(s, header, hlen, 0);
 		if (bodyLen > 0) send(s, body, bodyLen, 0);
 	}
@@ -239,56 +232,67 @@ namespace WebServer
 
 	inline void HandleClient(SOCKET client)
 	{
-		char buf[4096] = {};
-		int received = recv(client, buf, sizeof(buf) - 1, 0);
-		if (received <= 0) { closesocket(client); return; }
-		buf[received] = 0;
+		int nodelay = 1;
+		setsockopt(client, IPPROTO_TCP, TCP_NODELAY, (char*)&nodelay, sizeof(nodelay));
+		DWORD timeout = 5000;
+		setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
 
-		char method[16] = {}, path[512] = {};
-		sscanf_s(buf, "%15s %511s", method, (unsigned)sizeof(method), path, (unsigned)sizeof(path));
+		for (;;) {
+			char buf[4096] = {};
+			int received = recv(client, buf, sizeof(buf) - 1, 0);
+			if (received <= 0) break;
+			buf[received] = 0;
 
-		if (_stricmp(method, "OPTIONS") == 0)
-		{
-			SendResponse(client, 200, "text/plain", "", 0);
-		}
-		else if (_stricmp(method, "GET") == 0 && strcmp(path, "/") == 0)
-		{
-			int htmlLen = (int)strlen(WEB_UI_HTML);
-			SendResponse(client, 200, "text/html; charset=utf-8", WEB_UI_HTML, htmlLen);
-		}
-		else if (_stricmp(method, "GET") == 0 && strcmp(path, "/api/config") == 0)
-		{
-			HandleConfigGet(client);
-		}
-		else if (_stricmp(method, "GET") == 0 && strcmp(path, "/api/gamedata") == 0)
-		{
-			HandleGameData(client);
-		}
-		else if (_stricmp(method, "POST") == 0 && strncmp(path, "/api/toggle/", 12) == 0)
-		{
-			HandleToggle(client, path + 12);
-		}
-		else if (_stricmp(method, "POST") == 0 && strncmp(path, "/api/set/", 9) == 0)
-		{
-			char feature[64] = {}, value[32] = {};
-			const char* p = path + 9;
-			const char* slash = strchr(p, '/');
-			if (slash)
+			char method[16] = {}, path[512] = {};
+			sscanf_s(buf, "%15s %511s", method, (unsigned)sizeof(method), path, (unsigned)sizeof(path));
+
+			bool wantKeepAlive = (strstr(buf, "keep-alive") != nullptr);
+
+			if (_stricmp(method, "OPTIONS") == 0)
 			{
-				int flen = (int)(slash - p);
-				if (flen > 63) flen = 63;
-				memcpy(feature, p, flen); feature[flen] = 0;
-				strncpy_s(value, slash + 1, 31);
-				HandleSet(client, feature, value);
+				SendResponse(client, 200, "text/plain", "", 0, wantKeepAlive);
+			}
+			else if (_stricmp(method, "GET") == 0 && strcmp(path, "/") == 0)
+			{
+				int htmlLen = (int)strlen(WEB_UI_HTML);
+				SendResponse(client, 200, "text/html; charset=utf-8", WEB_UI_HTML, htmlLen, false);
+			}
+			else if (_stricmp(method, "GET") == 0 && strcmp(path, "/api/config") == 0)
+			{
+				HandleConfigGet(client);
+			}
+			else if (_stricmp(method, "GET") == 0 && strcmp(path, "/api/gamedata") == 0)
+			{
+				HandleGameData(client);
+			}
+			else if (_stricmp(method, "POST") == 0 && strncmp(path, "/api/toggle/", 12) == 0)
+			{
+				HandleToggle(client, path + 12);
+			}
+			else if (_stricmp(method, "POST") == 0 && strncmp(path, "/api/set/", 9) == 0)
+			{
+				char feature[64] = {}, value[32] = {};
+				const char* p = path + 9;
+				const char* slash = strchr(p, '/');
+				if (slash)
+				{
+					int flen = (int)(slash - p);
+					if (flen > 63) flen = 63;
+					memcpy(feature, p, flen); feature[flen] = 0;
+					strncpy_s(value, slash + 1, 31);
+					HandleSet(client, feature, value);
+				}
+				else
+				{
+					SendResponse(client, 400, "application/json", "{\"error\":\"missing value\"}", 24, false);
+				}
 			}
 			else
 			{
-				SendResponse(client, 400, "application/json", "{\"error\":\"missing value\"}", 24);
+				SendResponse(client, 404, "text/plain", "Not Found", 9, false);
 			}
-		}
-		else
-		{
-			SendResponse(client, 404, "text/plain", "Not Found", 9);
+
+			if (!wantKeepAlive) break;
 		}
 
 		closesocket(client);
