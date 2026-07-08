@@ -348,6 +348,7 @@ static const GameDef KnownGames[] = {
     {"arenabreakout",  "ArenaBreakoutInfinite-Win64-Shipping.exe", ENGINE_UE5,    "ArenaBreakoutInfinite-Win64-Shipping.exe"},
     {"abi",            "ArenaBreakoutInfinite-Win64-Shipping.exe", ENGINE_UE5,    "ArenaBreakoutInfinite-Win64-Shipping.exe"},
     {"arenabreakout",  "ArenaBreakout.exe",                        ENGINE_UE5,    "ArenaBreakout.exe"},
+    {"hunger",         "ProjectRLH-Win64-Shipping.exe",            ENGINE_UE5,    "ProjectRLH-Win64-Shipping.exe"},
     {"hunger",         "Hunger-Win64-Shipping.exe",                ENGINE_UE5,    "Hunger-Win64-Shipping.exe"},
     {"hunger",         "HungerGame-Win64-Shipping.exe",            ENGINE_UE5,    "HungerGame-Win64-Shipping.exe"},
     {"hunger",         "Hunger.exe",                               ENGINE_UE5,    "Hunger.exe"},

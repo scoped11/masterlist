@@ -445,14 +445,112 @@ static uint64_t DecryptPtr(uint64_t encrypted) {
     if (!g_decryptKey && !g_decryptRotation) return encrypted;
     uint64_t val = encrypted ^ g_decryptKey;
     if (g_decryptRotation > 0)
-        val = (val >> g_decryptRotation) | (val << (64 - g_decryptRotation));
+        val = _rotl64(val, g_decryptRotation);
     else if (g_decryptRotation < 0)
-        val = (val << (-g_decryptRotation)) | (val >> (64 + g_decryptRotation));
+        val = _rotr64(val, -g_decryptRotation);
     return val;
 }
 
 static uint64_t ReadEncPtr(uint64_t addr) {
     return DecryptPtr(rpm<uint64_t>(addr));
+}
+
+static void ScanForEncryptionKey(uint64_t textBase, uint64_t textSize, uint64_t gameMgrGlobalAddr) {
+    printf("[*] Scanning for encryption key (xrefs to GameManager at 0x%llX)...\n",
+           (unsigned long long)gameMgrGlobalAddr);
+
+    const uint32_t CHUNK = 0x10000;
+    std::vector<uint8_t> buf(CHUNK + 64);
+    int xrefCount = 0;
+
+    for (uint64_t off = 0; off < textSize && !g_decryptKey; off += CHUNK) {
+        uint32_t readSize = (uint32_t)min((uint64_t)(CHUNK + 64), textSize - off);
+        if (!DmaRead(textBase + off, buf.data(), readSize)) continue;
+
+        for (uint32_t i = 0; i < readSize - 32; i++) {
+            // MOV reg, [rip+disp32]: 48 8B XX where (modrm & 0xC7)==0x05
+            // LEA reg, [rip+disp32]: 48 8D XX where (modrm & 0xC7)==0x05
+            if (buf[i] != 0x48) continue;
+            if (buf[i+1] != 0x8B && buf[i+1] != 0x8D) continue;
+            uint8_t modrm = buf[i+2];
+            if ((modrm & 0xC7) != 0x05) continue;
+
+            int32_t disp = *(int32_t*)(buf.data() + i + 3);
+            uint64_t instrAddr = textBase + off + i;
+            uint64_t resolved = instrAddr + 7 + disp;
+
+            if (resolved != gameMgrGlobalAddr) continue;
+            xrefCount++;
+            if (xrefCount > 20) break;
+
+            printf("[+] GameManager xref #%d at 0x%llX\n", xrefCount, (unsigned long long)instrAddr);
+
+            uint8_t scanBuf[256] = {};
+            uint64_t scanStart = (instrAddr > textBase + 32) ? instrAddr - 32 : textBase;
+            DmaRead(scanStart, scanBuf, 256);
+            int baseOff = (int)(instrAddr - scanStart);
+
+            uint64_t candKey = 0;
+            int candRot = 0;
+            bool sawXOR = false;
+            bool sawROT = false;
+
+            for (int j = baseOff; j < 220; j++) {
+                // MOVABS r64, imm64: REX.W + B8-BF + 8 bytes
+                if (scanBuf[j] == 0x48 && scanBuf[j+1] >= 0xB8 && scanBuf[j+1] <= 0xBF) {
+                    uint64_t imm = *(uint64_t*)(scanBuf + j + 2);
+                    if (imm > 0xFFFF && imm != 0xFFFFFFFFFFFFFFFF) {
+                        candKey = imm;
+                        printf("    MOV r64, 0x%llX at +%d\n", (unsigned long long)imm, j - baseOff);
+                    }
+                    j += 9;
+                    continue;
+                }
+                // Also check 49 B8-BF (REX.WB for r8-r15)
+                if (scanBuf[j] == 0x49 && scanBuf[j+1] >= 0xB8 && scanBuf[j+1] <= 0xBF) {
+                    uint64_t imm = *(uint64_t*)(scanBuf + j + 2);
+                    if (imm > 0xFFFF && imm != 0xFFFFFFFFFFFFFFFF) {
+                        candKey = imm;
+                        printf("    MOV r64, 0x%llX at +%d\n", (unsigned long long)imm, j - baseOff);
+                    }
+                    j += 9;
+                    continue;
+                }
+                // XOR r64,r64: 48 31/33 XX or 4C/49 31/33 XX
+                if ((scanBuf[j] == 0x48 || scanBuf[j] == 0x49 || scanBuf[j] == 0x4C) &&
+                    (scanBuf[j+1] == 0x31 || scanBuf[j+1] == 0x33)) {
+                    sawXOR = true;
+                    printf("    XOR at +%d\n", j - baseOff);
+                }
+                // ROL r64, imm8: 48 C1 C0-C7 XX
+                if ((scanBuf[j] == 0x48 || scanBuf[j] == 0x49) && scanBuf[j+1] == 0xC1) {
+                    uint8_t rm = scanBuf[j+2];
+                    if (rm >= 0xC0 && rm <= 0xC7) {
+                        candRot = (int)scanBuf[j+3];
+                        sawROT = true;
+                        printf("    ROL by %d at +%d\n", candRot, j - baseOff);
+                    } else if (rm >= 0xC8 && rm <= 0xCF) {
+                        candRot = -(int)scanBuf[j+3];
+                        sawROT = true;
+                        printf("    ROR by %d at +%d\n", (int)scanBuf[j+3], j - baseOff);
+                    }
+                }
+            }
+
+            if (candKey && sawXOR) {
+                printf("[+] ENCRYPTION KEY FOUND!\n");
+                printf("    Key:      0x%llX\n", (unsigned long long)candKey);
+                printf("    Rotation: %d (%s)\n", abs(candRot),
+                       candRot > 0 ? "ROL" : candRot < 0 ? "ROR" : "none");
+                g_decryptKey = candKey;
+                g_decryptRotation = candRot;
+                return;
+            }
+        }
+    }
+
+    if (!g_decryptKey)
+        printf("[*] No encryption detected — GameManager may use plaintext pointers (%d xrefs checked)\n", xrefCount);
 }
 
 
@@ -1802,6 +1900,54 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
 
     if (!O::GameManager && !O::GWorld)
         printf("[!] No GameManager or GWorld — configure %s with offsets or sig patterns.\n", offsetsPath.c_str());
+
+    // Auto-scan for encryption key if not set manually
+    if (!g_decryptKey && !g_decryptRotation && O::GameManager) {
+        IMAGE_DOS_HEADER dos2 = rpm<IMAGE_DOS_HEADER>(g_base);
+        IMAGE_NT_HEADERS64 nt2 = rpm<IMAGE_NT_HEADERS64>(g_base + dos2.e_lfanew);
+        uint64_t tb = 0, ts = 0;
+        uint64_t sa = g_base + dos2.e_lfanew + sizeof(IMAGE_NT_HEADERS64);
+        for (int i = 0; i < nt2.FileHeader.NumberOfSections; i++) {
+            IMAGE_SECTION_HEADER sec = rpm<IMAGE_SECTION_HEADER>(sa + i * sizeof(IMAGE_SECTION_HEADER));
+            if (memcmp(sec.Name, ".text", 5) == 0) { tb = g_base + sec.VirtualAddress; ts = sec.Misc.VirtualSize; break; }
+        }
+        if (!tb) { tb = g_base + 0x1000; ts = nt2.OptionalHeader.SizeOfCode; }
+        ScanForEncryptionKey(tb, ts, g_base + O::GameManager);
+    }
+
+    // Diagnostic: try reading through the entity chain and report what we find
+    if (O::GameManager) {
+        uint64_t gmRaw = rpm<uint64_t>(g_base + O::GameManager);
+        uint64_t gmDec = DecryptPtr(gmRaw);
+        printf("\n=== Entity Chain Diagnostic ===\n");
+        printf("GameManager RVA:     0x%llX\n", (unsigned long long)O::GameManager);
+        printf("GameManager raw ptr: 0x%llX\n", (unsigned long long)gmRaw);
+        printf("GameManager decrypted: 0x%llX\n", (unsigned long long)gmDec);
+        if (gmDec > 0x10000) {
+            uint64_t entList = rpm<uint64_t>(gmDec + O::Actors);
+            int entCount = rpm<int32_t>(gmDec + O::ActorCount);
+            printf("EntityList (GM+0x%X): 0x%llX\n", (uint32_t)O::Actors, (unsigned long long)entList);
+            printf("EntityCount (GM+0x%X): %d\n", (uint32_t)O::ActorCount, entCount);
+            if (entList > 0x10000 && entCount > 0 && entCount < 200) {
+                uint64_t first3[3] = {};
+                DmaRead(entList, first3, sizeof(first3));
+                for (int i = 0; i < min(entCount, 3); i++) {
+                    uint64_t ent = DecryptPtr(first3[i]);
+                    printf("  Entity[%d] raw=0x%llX dec=0x%llX", i, (unsigned long long)first3[i], (unsigned long long)ent);
+                    if (ent > 0x10000 && O::EntityPawn) {
+                        uint64_t pawn = ReadEncPtr(ent + O::EntityPawn);
+                        printf(" pawn=0x%llX", (unsigned long long)pawn);
+                        if (pawn > 0x10000 && O::EntityPawnFeet) {
+                            Vec3 pos = rpm<Vec3>(pawn + O::EntityPawnFeet);
+                            printf(" pos=(%.1f, %.1f, %.1f)", pos.x, pos.y, pos.z);
+                        }
+                    }
+                    printf("\n");
+                }
+            }
+        }
+        printf("===============================\n\n");
+    }
 
     WebMenu::Start();
 

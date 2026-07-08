@@ -1,10 +1,9 @@
-// esp_client.exe — External ESP overlay for PC1
-// Connects to CoopyyDMA web API on PC2 and renders ESP over game window
+// External ESP overlay for PC1
+// Connects to DMA web API on PC2 and renders ESP over game window
 // Usage: esp_client.exe [server_ip] [port] [game]
 //   Default: esp_client.exe 192.168.1.211 9222 unturned
 //   Rust:    esp_client.exe 192.168.1.211 8888 rust
-//   Game names: unturned, rust (auto-detects window title)
-// Build: cl /EHsc /O2 /std:c++17 esp_client.cpp /link ws2_32.lib user32.lib gdi32.lib /OUT:esp_client.exe
+// Build: cl /EHsc /O2 /std:c++17 esp_client.cpp /link ws2_32.lib user32.lib gdi32.lib winmm.lib /OUT:esp_client.exe
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -20,15 +19,72 @@
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
-
-#ifndef WDA_EXCLUDEFROMCAPTURE
-#define WDA_EXCLUDEFROMCAPTURE 0x00000011
-#endif
+#pragma comment(lib, "winmm.lib")
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
 #endif
 #define DEG2RAD(x) ((x) * M_PI / 180.0f)
+
+// ============ STRING OBFUSCATION ============
+
+static std::string _xd(const unsigned char* d, int n) {
+	std::string s(n, 0);
+	for (int i = 0; i < n; i++) s[i] = d[i] ^ 0x5A;
+	return s;
+}
+
+// ============ GDI OBJECT CACHE ============
+
+struct _PenE { DWORD key; HPEN pen; };
+struct _BrushE { COLORREF key; HBRUSH brush; };
+static _PenE g_penC[256]; static int g_penN = 0;
+static _BrushE g_brC[256]; static int g_brN = 0;
+
+static HPEN CPen(COLORREF c, int w = 1) {
+	DWORD k = (c & 0x00FFFFFF) | ((DWORD)(w & 0xFF) << 24);
+	for (int i = 0; i < g_penN; i++) if (g_penC[i].key == k) return g_penC[i].pen;
+	if (g_penN >= 256) { for (int i = 0; i < g_penN; i++) DeleteObject(g_penC[i].pen); g_penN = 0; }
+	HPEN p = CreatePen(PS_SOLID, w, c);
+	g_penC[g_penN++] = { k, p };
+	return p;
+}
+
+static HBRUSH CBrush(COLORREF c) {
+	for (int i = 0; i < g_brN; i++) if (g_brC[i].key == c) return g_brC[i].brush;
+	if (g_brN >= 256) { for (int i = 0; i < g_brN; i++) DeleteObject(g_brC[i].brush); g_brN = 0; }
+	HBRUSH b = CreateSolidBrush(c);
+	g_brC[g_brN++] = { c, b };
+	return b;
+}
+
+static void CleanGDI() {
+	for (int i = 0; i < g_penN; i++) DeleteObject(g_penC[i].pen); g_penN = 0;
+	for (int i = 0; i < g_brN; i++) DeleteObject(g_brC[i].brush); g_brN = 0;
+}
+
+// ============ STEALTH HELPERS ============
+
+static char g_wndClass[16] = {};
+
+static void GenWndClass() {
+	typedef BOOLEAN (WINAPI* RtlGenRandom_t)(PVOID, ULONG);
+	auto fn = (RtlGenRandom_t)GetProcAddress(GetModuleHandleA("advapi32.dll"), "SystemFunction036");
+	unsigned char buf[12];
+	if (fn && fn(buf, 12)) {
+		for (int i = 0; i < 12; i++) g_wndClass[i] = 'a' + (buf[i] % 26);
+	} else {
+		srand(GetTickCount() ^ (unsigned)GetCurrentProcessId());
+		for (int i = 0; i < 12; i++) g_wndClass[i] = 'a' + (rand() % 26);
+	}
+	g_wndClass[12] = 0;
+}
+
+static void HideThrd() {
+	typedef long (__stdcall* NtSIT_t)(HANDLE, ULONG, PVOID, ULONG);
+	auto f = (NtSIT_t)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtSetInformationThread");
+	if (f) f(GetCurrentThread(), 0x11, nullptr, 0);
+}
 
 // ============ DATA STRUCTURES ============
 
@@ -172,6 +228,16 @@ static bool g_menuOpen = false;
 static int g_activeTab = 0;
 static HFONT g_menuFont = NULL;
 static HFONT g_menuFontBold = NULL;
+
+// Cached backbuffer
+static HDC g_memDC = NULL;
+static HBITMAP g_memBmp = NULL;
+static HBITMAP g_oldBmp = NULL;
+static int g_bw = 0, g_bh = 0;
+
+// QPC timing
+static LARGE_INTEGER g_qpfFreq = {};
+static int g_refreshRate = 60;
 
 // ============ JSON HELPERS ============
 
@@ -470,17 +536,15 @@ static bool W2S(vec3 world, vec3 cam, float yaw, float pitch, float fov, int sw,
 	return true;
 }
 
-// ============ GDI DRAWING ============
+// ============ GDI DRAWING (CACHED) ============
 
 static void DrawRect(HDC hdc, int x, int y, int w, int h, COLORREF c, int thick = 1)
 {
-	HPEN pen = CreatePen(PS_SOLID, thick, c);
-	HPEN op = (HPEN)SelectObject(hdc, pen);
+	HPEN op = (HPEN)SelectObject(hdc, CPen(c, thick));
 	HBRUSH ob = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
 	Rectangle(hdc, x, y, x + w, y + h);
 	SelectObject(hdc, ob);
 	SelectObject(hdc, op);
-	DeleteObject(pen);
 }
 
 static void DrawBoxOutline(HDC hdc, int x, int y, int w, int h, COLORREF c)
@@ -492,20 +556,16 @@ static void DrawBoxOutline(HDC hdc, int x, int y, int w, int h, COLORREF c)
 
 static void DrawLine(HDC hdc, int x1, int y1, int x2, int y2, COLORREF c, int thick = 1)
 {
-	HPEN pen = CreatePen(PS_SOLID, thick, c);
-	HPEN op = (HPEN)SelectObject(hdc, pen);
+	HPEN op = (HPEN)SelectObject(hdc, CPen(c, thick));
 	MoveToEx(hdc, x1, y1, NULL);
 	LineTo(hdc, x2, y2);
 	SelectObject(hdc, op);
-	DeleteObject(pen);
 }
 
 static void FillRect2(HDC hdc, int x, int y, int w, int h, COLORREF c)
 {
-	HBRUSH br = CreateSolidBrush(c);
 	RECT rc = { x, y, x + w, y + h };
-	FillRect(hdc, &rc, br);
-	DeleteObject(br);
+	FillRect(hdc, &rc, CBrush(c));
 }
 
 static void DrawText2(HDC hdc, int x, int y, const char* text, COLORREF c, HFONT font = NULL)
@@ -528,26 +588,20 @@ static void DrawHealthBar(HDC hdc, int x, int y, int w, int h, float hp01)
 
 static void DrawCircle(HDC hdc, int cx, int cy, int radius, COLORREF c)
 {
-	HPEN pen = CreatePen(PS_SOLID, 1, c);
-	HPEN op = (HPEN)SelectObject(hdc, pen);
+	HPEN op = (HPEN)SelectObject(hdc, CPen(c));
 	HBRUSH ob = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
 	Ellipse(hdc, cx - radius, cy - radius, cx + radius, cy + radius);
 	SelectObject(hdc, ob);
 	SelectObject(hdc, op);
-	DeleteObject(pen);
 }
 
 static void DrawFilledCircle(HDC hdc, int cx, int cy, int radius, COLORREF c)
 {
-	HBRUSH br = CreateSolidBrush(c);
-	HPEN pen = CreatePen(PS_SOLID, 1, c);
-	HPEN op = (HPEN)SelectObject(hdc, pen);
-	HBRUSH ob = (HBRUSH)SelectObject(hdc, br);
+	HPEN op = (HPEN)SelectObject(hdc, CPen(c));
+	HBRUSH ob = (HBRUSH)SelectObject(hdc, CBrush(c));
 	Ellipse(hdc, cx - radius, cy - radius, cx + radius, cy + radius);
 	SelectObject(hdc, ob);
 	SelectObject(hdc, op);
-	DeleteObject(pen);
-	DeleteObject(br);
 }
 
 // ============ ESP RENDERING ============
@@ -704,7 +758,10 @@ static void RenderMenu(HDC hdc, int sw, int sh, const FullConfig& fc)
 	DrawRect(hdc, MENU_X, MENU_Y, MENU_W, menuH, RGB(55, 55, 95));
 
 	HFONT oldFont = (HFONT)SelectObject(hdc, g_menuFontBold);
-	DrawText2(hdc, MENU_X + 10, MENU_Y + 6, "penisfinger DMA  |  F1 close", RGB(100, 170, 255), g_menuFontBold);
+	// XOR-decoded title: "penisfinger DMA  |  F1 close"
+	static std::string menuTitle = _xd((const unsigned char*)
+		"\x3a\x3f\x34\x33\x29\x36\x33\x34\x37\x3f\x28\x7a\x1e\x1d\x1b\x7a\x7a\x56\x7a\x7a\x1c\x71\x7a\x39\x36\x35\x29\x3f", 28);
+	DrawText2(hdc, MENU_X + 10, MENU_Y + 6, menuTitle.c_str(), RGB(100, 170, 255), g_menuFontBold);
 	DrawLine(hdc, MENU_X, MENU_Y + TITLE_H, MENU_X + MENU_W, MENU_Y + TITLE_H, RGB(55, 55, 95));
 
 	int tabW = MENU_W / TAB_COUNT;
@@ -800,13 +857,18 @@ static char g_gameName[64] = "unturned";
 
 static HWND FindGameWindow()
 {
-	if (_stricmp(g_gameName, "rust") == 0) {
-		HWND hw = FindWindowA(NULL, "Rust");
-		if (!hw) hw = FindWindowA("UnityWndClass", "Rust");
+	// XOR 0x5A decoded at first call
+	static std::string s_rust = _xd((const unsigned char*)"\x08\x2f\x29\x2e", 4);
+	static std::string s_unturned = _xd((const unsigned char*)"\x0f\x34\x2e\x2f\x28\x34\x3f\x3e", 8);
+	static std::string s_unitycls = _xd((const unsigned char*)"\x0f\x34\x33\x2e\x23\x0d\x34\x3e\x19\x36\x3b\x29\x29", 13);
+
+	if (_stricmp(g_gameName, s_rust.c_str()) == 0) {
+		HWND hw = FindWindowA(NULL, s_rust.c_str());
+		if (!hw) hw = FindWindowA(s_unitycls.c_str(), s_rust.c_str());
 		return hw;
 	}
-	HWND hw = FindWindowA(NULL, "Unturned");
-	if (!hw) hw = FindWindowA("UnityWndClass", NULL);
+	HWND hw = FindWindowA(NULL, s_unturned.c_str());
+	if (!hw) hw = FindWindowA(s_unitycls.c_str(), NULL);
 	return hw;
 }
 
@@ -820,10 +882,7 @@ int main(int argc, char* argv[])
 	if (argc >= 3) g_serverPort = atoi(argv[2]);
 	if (argc >= 4) strncpy_s(g_gameName, argv[3], sizeof(g_gameName) - 1);
 
-	printf("=== CoopyyDMA ESP Client ===\n");
-	printf("Server: %s:%d\n", g_serverIP, g_serverPort);
-	printf("Game: %s\n", g_gameName);
-	printf("Looking for %s window...\n", g_gameName);
+	printf("Server: %s:%d | Game: %s\n", g_serverIP, g_serverPort, g_gameName);
 
 	WSADATA wsa;
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
@@ -844,32 +903,38 @@ int main(int argc, char* argv[])
 	ClientToScreen(g_gameWnd, &topLeft);
 	int sw = gameRect.right - gameRect.left;
 	int sh = gameRect.bottom - gameRect.top;
-	printf("Found %s: %dx%d at (%d,%d)\n", g_gameName, sw, sh, topLeft.x, topLeft.y);
+	printf("Window: %dx%d at (%d,%d)\n", sw, sh, topLeft.x, topLeft.y);
+
+	// Random window class name — defeats EnumWindows class name scanning
+	GenWndClass();
 
 	WNDCLASSEXA wc = {};
 	wc.cbSize = sizeof(wc);
 	wc.style = CS_HREDRAW | CS_VREDRAW;
 	wc.lpfnWndProc = WndProc;
 	wc.hInstance = GetModuleHandle(NULL);
-	wc.lpszClassName = "CoopyyESP";
+	wc.lpszClassName = g_wndClass;
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 	RegisterClassExA(&wc);
 
 	g_overlay = CreateWindowExA(
-		WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-		"CoopyyESP", "",
+		WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+		g_wndClass, "",
 		WS_POPUP,
 		topLeft.x, topLeft.y, sw, sh,
 		NULL, NULL, GetModuleHandle(NULL), NULL);
 
 	if (!g_overlay) {
-		printf("Failed to create overlay window\n");
+		printf("Overlay failed\n");
 		return 1;
 	}
 
-	SetLayeredWindowAttributes(g_overlay, RGB(0, 0, 0), 0, LWA_COLORKEY);
-	SetWindowDisplayAffinity(g_overlay, WDA_EXCLUDEFROMCAPTURE);
+	// No SetLayeredWindowAttributes — using UpdateLayeredWindow (ULW_COLORKEY)
 	ShowWindow(g_overlay, SW_SHOWNOACTIVATE);
+
+	// WDA_EXCLUDEFROMCAPTURE with WDA_MONITOR fallback
+	if (!SetWindowDisplayAffinity(g_overlay, 0x11))
+		SetWindowDisplayAffinity(g_overlay, 0x01);
 
 	g_font = CreateFontA(16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
 		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -877,7 +942,6 @@ int main(int argc, char* argv[])
 	g_fontSmall = CreateFontA(12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
 		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
 		ANTIALIASED_QUALITY, DEFAULT_PITCH, "Consolas");
-
 	g_menuFont = CreateFontA(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
 		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
 		CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
@@ -885,18 +949,33 @@ int main(int argc, char* argv[])
 		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
 		CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
 
-	printf("Overlay created (stream-proof). Starting data threads...\n");
+	printf("Overlay ready.\n");
 
 	std::thread t1(dataThread);
 	std::thread t2(configThread);
 	t1.detach();
 	t2.detach();
 
-	printf("ESP active. Press Ctrl+C to exit.\n\n");
+	// Hide console window — visible console is a detection vector
+	FreeConsole();
 
-	bool wasConnected = false;
+	// Hide overlay thread from debugger enumeration
+	HideThrd();
+
+	// QPC frame pacing setup
+	timeBeginPeriod(1);
+	QueryPerformanceFrequency(&g_qpfFreq);
+	{
+		HDC sdc = GetDC(NULL);
+		int rr = GetDeviceCaps(sdc, VREFRESH);
+		ReleaseDC(NULL, sdc);
+		if (rr > 10 && rr <= 360) g_refreshRate = rr;
+	}
 
 	while (g_running) {
+		LARGE_INTEGER frameStart;
+		QueryPerformanceCounter(&frameStart);
+
 		MSG msg;
 		while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
 			if (msg.message == WM_QUIT) { g_running = false; break; }
@@ -905,9 +984,7 @@ int main(int argc, char* argv[])
 		}
 		if (!g_running) break;
 
-		if (g_connected && !wasConnected) { printf("[+] Connected to DMA server\n"); wasConnected = true; }
-		if (!g_connected && wasConnected) { printf("[-] Lost connection\n"); wasConnected = false; }
-
+		// F1 toggle menu — removes WS_EX_TRANSPARENT when open for click capture
 		static bool f1WasDown = false;
 		bool f1Down = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
 		if (f1Down && !f1WasDown) {
@@ -920,6 +997,7 @@ int main(int argc, char* argv[])
 		}
 		f1WasDown = f1Down;
 
+		// Menu click handling
 		static bool lmbWasDown = false;
 		bool lmbDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
 		if (lmbDown && !lmbWasDown && g_menuOpen) {
@@ -931,6 +1009,7 @@ int main(int argc, char* argv[])
 		}
 		lmbWasDown = lmbDown;
 
+		// Track game window position/size
 		HWND gw = FindGameWindow();
 		if (gw && gw != g_gameWnd) g_gameWnd = gw;
 
@@ -942,12 +1021,13 @@ int main(int argc, char* argv[])
 			int nh = gameRect.bottom - gameRect.top;
 			if (nw != sw || nh != sh || tl.x != topLeft.x || tl.y != topLeft.y) {
 				sw = nw; sh = nh; topLeft = tl;
-				SetWindowPos(g_overlay, HWND_TOP, topLeft.x, topLeft.y, sw, sh, SWP_NOACTIVATE);
+				SetWindowPos(g_overlay, HWND_TOPMOST, topLeft.x, topLeft.y, sw, sh, SWP_NOACTIVATE);
 			} else {
-				SetWindowPos(g_overlay, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+				SetWindowPos(g_overlay, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 			}
 		}
 
+		// Copy game state under lock
 		GameData localGD;
 		ESPConfig localCfg;
 		FullConfig localFcfg;
@@ -958,42 +1038,58 @@ int main(int argc, char* argv[])
 			localFcfg = g_fcfg;
 		}
 
-		HDC hdc = GetDC(g_overlay);
-		HDC memDC = CreateCompatibleDC(hdc);
-		HBITMAP memBmp = CreateCompatibleBitmap(hdc, sw, sh);
-		HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
+		// Cached backbuffer — only reallocated on window resize
+		HDC screenDC = GetDC(NULL);
+		if (!g_memDC) g_memDC = CreateCompatibleDC(screenDC);
+		if (sw != g_bw || sh != g_bh) {
+			if (g_memBmp) { SelectObject(g_memDC, g_oldBmp); DeleteObject(g_memBmp); }
+			g_memBmp = CreateCompatibleBitmap(screenDC, sw, sh);
+			g_oldBmp = (HBITMAP)SelectObject(g_memDC, g_memBmp);
+			g_bw = sw; g_bh = sh;
+		}
 
+		// Clear to transparent black (color key)
 		RECT clr = { 0, 0, sw, sh };
-		HBRUSH clrBr = CreateSolidBrush(RGB(0, 0, 0));
-		FillRect(memDC, &clr, clrBr);
-		DeleteObject(clrBr);
+		FillRect(g_memDC, &clr, CBrush(RGB(0, 0, 0)));
 
-		SelectObject(memDC, g_font);
-		RenderESP(memDC, sw, sh, localGD, localCfg);
-		RenderRadar(memDC, sw, sh, localGD, localCfg);
-		RenderMenu(memDC, sw, sh, localFcfg);
+		// Render all elements to cached backbuffer
+		SelectObject(g_memDC, g_font);
+		RenderESP(g_memDC, sw, sh, localGD, localCfg);
+		RenderRadar(g_memDC, sw, sh, localGD, localCfg);
+		RenderMenu(g_memDC, sw, sh, localFcfg);
 
-		if (g_connected)
-			DrawText2(memDC, 5, sh - 20, "DMA ESP | Streamproof", RGB(0, 255, 100), g_fontSmall);
-		else
-			DrawText2(memDC, 5, sh - 20, "DMA ESP | Connecting...", RGB(255, 100, 0), g_fontSmall);
+		// Status indicator — small dot, no text signatures
+		DrawFilledCircle(g_memDC, 8, sh - 12, 4,
+			g_connected ? RGB(0, 255, 100) : RGB(255, 100, 0));
 
-		BitBlt(hdc, 0, 0, sw, sh, memDC, 0, 0, SRCCOPY);
+		// UpdateLayeredWindow — GPU-composited, no SetLayeredWindowAttributes needed
+		POINT ptSrc = { 0, 0 };
+		POINT ptDst = { topLeft.x, topLeft.y };
+		SIZE szWnd = { sw, sh };
+		BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, 0 };
+		UpdateLayeredWindow(g_overlay, screenDC, &ptDst, &szWnd,
+			g_memDC, &ptSrc, RGB(0, 0, 0), &blend, ULW_COLORKEY);
+		ReleaseDC(NULL, screenDC);
 
-		SelectObject(memDC, oldBmp);
-		DeleteObject(memBmp);
-		DeleteDC(memDC);
-		ReleaseDC(g_overlay, hdc);
-
-		Sleep(16);
+		// QPC-based frame pacing at monitor refresh rate
+		LARGE_INTEGER frameEnd;
+		QueryPerformanceCounter(&frameEnd);
+		double elapsedMs = (double)(frameEnd.QuadPart - frameStart.QuadPart) / g_qpfFreq.QuadPart * 1000.0;
+		double remainMs = (1000.0 / g_refreshRate) - elapsedMs;
+		if (remainMs > 1.0) Sleep((DWORD)remainMs);
 	}
 
+	// Cleanup
+	CleanGDI();
+	if (g_memBmp) { SelectObject(g_memDC, g_oldBmp); DeleteObject(g_memBmp); }
+	if (g_memDC) DeleteDC(g_memDC);
+	timeEndPeriod(1);
 	if (g_font) DeleteObject(g_font);
 	if (g_fontSmall) DeleteObject(g_fontSmall);
 	if (g_menuFont) DeleteObject(g_menuFont);
 	if (g_menuFontBold) DeleteObject(g_menuFontBold);
 	if (g_overlay) DestroyWindow(g_overlay);
-	UnregisterClassA("CoopyyESP", GetModuleHandle(NULL));
+	UnregisterClassA(g_wndClass, GetModuleHandle(NULL));
 	WSACleanup();
 	return 0;
 }
