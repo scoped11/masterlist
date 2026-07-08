@@ -32,57 +32,66 @@ namespace Classes
 
 	void init()
 	{
-		Log("  Finding Provider...");
-		Provider = mono::find_class("Assembly-CSharp", "SDG.Unturned.Provider");
-		Log("  Finding Player...");
-		Player = mono::find_class("Assembly-CSharp", "SDG.Unturned.Player");
-		Log("  Finding SteamChannel...");
-		SteamChannel = mono::find_class("Assembly-CSharp", "SDG.Unturned.SteamChannel");
-		Log("  Finding SteamPlayer...");
-		SteamPlayer = mono::find_class("Assembly-CSharp", "SDG.Unturned.SteamPlayer");
-		Log("  Finding PlayerEquipment...");
-		PlayerEquipment = mono::find_class("Assembly-CSharp", "SDG.Unturned.PlayerEquipment");
-		Log("  Finding ItemAsset...");
-		ItemAsset = mono::find_class("Assembly-CSharp", "SDG.Unturned.ItemAsset");
-		Log("  Finding ItemWeaponAsset...");
-		ItemWeaponAsset = mono::find_class("Assembly-CSharp", "SDG.Unturned.ItemWeaponAsset");
-		Log("  Finding ItemGunAsset...");
-		ItemGunAsset = mono::find_class("Assembly-CSharp", "SDG.Unturned.ItemGunAsset");
-		Log("  Finding PlayerLife...");
-		PlayerLife = mono::find_class("Assembly-CSharp", "SDG.Unturned.PlayerLife");
-		Log("  Finding PlayerMovement...");
-		PlayerMovement = mono::find_class("Assembly-CSharp", "SDG.Unturned.PlayerMovement");
-		Log("  Finding PlayerLook...");
-		PlayerLook = mono::find_class("Assembly-CSharp", "SDG.Unturned.PlayerLook");
-		Log("  Finding PlayerAnimator...");
-		PlayerAnimator = mono::find_class("Assembly-CSharp", "SDG.Unturned.PlayerAnimator");
-		Log("  Finding PlayerClothing...");
-		PlayerClothing = mono::find_class("Assembly-CSharp", "SDG.Unturned.PlayerClothing");
-		Log("  Finding InteractableVehicle...");
-		InteractableVehicle = mono::find_class("Assembly-CSharp", "SDG.Unturned.InteractableVehicle");
-		Log("  Finding SteamPlayerID...");
-		SteamPlayerID = mono::find_class("Assembly-CSharp", "SDG.Unturned.SteamPlayerID");
-		Log("  Finding VehicleManager...");
-		VehicleManager = mono::find_class("Assembly-CSharp", "SDG.Unturned.VehicleManager");
-		Log("  Finding ItemManager...");
-		ItemManager = mono::find_class("Assembly-CSharp", "SDG.Unturned.ItemManager");
-		Log("  Finding InteractableItem...");
-		InteractableItem = mono::find_class("Assembly-CSharp", "SDG.Unturned.InteractableItem");
-		Log("  Finding ZombieManager...");
-		ZombieManager = mono::find_class("Assembly-CSharp", "SDG.Unturned.ZombieManager");
-		Log("  Finding ZombieRegion...");
-		ZombieRegion = mono::find_class("Assembly-CSharp", "SDG.Unturned.ZombieRegion");
-		Log("  Finding Zombie...");
-		Zombie = mono::find_class("Assembly-CSharp", "SDG.Unturned.Zombie");
-		Log("  Finding LevelLighting...");
-		LevelLighting = mono::find_class("Assembly-CSharp", "SDG.Unturned.LevelLighting");
-		Log("  Finding UseableGun...");
-		UseableGun = mono::find_class("Assembly-CSharp", "SDG.Unturned.UseableGun");
-		Log("  Finding ItemAsset...");
-		ItemAsset_Class = mono::find_class("Assembly-CSharp", "SDG.Unturned.ItemAsset");
-		Log("  Finding OptionsSettings...");
-		OptionsSettings = mono::find_class("Assembly-CSharp", "SDG.Unturned.OptionsSettings");
-		Log("  All classes resolved.");
+		Log("  Batch-resolving all classes (single pass)...");
+
+		const char* names[] = {
+			"SDG.Unturned.Provider",
+			"SDG.Unturned.Player",
+			"SDG.Unturned.SteamChannel",
+			"SDG.Unturned.SteamPlayer",
+			"SDG.Unturned.PlayerEquipment",
+			"SDG.Unturned.ItemAsset",
+			"SDG.Unturned.ItemWeaponAsset",
+			"SDG.Unturned.ItemGunAsset",
+			"SDG.Unturned.PlayerLife",
+			"SDG.Unturned.PlayerMovement",
+			"SDG.Unturned.PlayerLook",
+			"SDG.Unturned.PlayerAnimator",
+			"SDG.Unturned.PlayerClothing",
+			"SDG.Unturned.InteractableVehicle",
+			"SDG.Unturned.SteamPlayerID",
+			"SDG.Unturned.VehicleManager",
+			"SDG.Unturned.ItemManager",
+			"SDG.Unturned.InteractableItem",
+			"SDG.Unturned.ZombieManager",
+			"SDG.Unturned.ZombieRegion",
+			"SDG.Unturned.Zombie",
+			"SDG.Unturned.LevelLighting",
+			"SDG.Unturned.UseableGun",
+			"SDG.Unturned.OptionsSettings",
+		};
+		mono_class_t* results[24] = {};
+		mono::find_classes_batch("Assembly-CSharp", names, results, 24);
+
+		Provider           = results[0];
+		Player             = results[1];
+		SteamChannel       = results[2];
+		SteamPlayer        = results[3];
+		PlayerEquipment    = results[4];
+		ItemAsset          = results[5];
+		ItemWeaponAsset    = results[6];
+		ItemGunAsset       = results[7];
+		PlayerLife         = results[8];
+		PlayerMovement     = results[9];
+		PlayerLook         = results[10];
+		PlayerAnimator     = results[11];
+		PlayerClothing     = results[12];
+		InteractableVehicle = results[13];
+		SteamPlayerID      = results[14];
+		VehicleManager     = results[15];
+		ItemManager        = results[16];
+		InteractableItem   = results[17];
+		ZombieManager      = results[18];
+		ZombieRegion       = results[19];
+		Zombie             = results[20];
+		LevelLighting      = results[21];
+		UseableGun         = results[22];
+		OptionsSettings    = results[23];
+		ItemAsset_Class    = results[5];
+
+		int found = 0;
+		for (int i = 0; i < 24; i++) if (results[i]) found++;
+		Log("  Resolved %d/24 classes.", found);
 	}
 }
 

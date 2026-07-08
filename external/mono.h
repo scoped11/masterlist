@@ -432,4 +432,43 @@ namespace mono
 
 		return nullptr;
 	}
+
+	inline void find_classes_batch(const char* assembly_name,
+		const char** class_names, mono_class_t** results, int count)
+	{
+		for (int i = 0; i < count; i++) results[i] = nullptr;
+
+		const auto root_domain = get_root_domain();
+		if (!root_domain) return;
+		const auto domain_assembly = domain_assembly_open(root_domain, assembly_name);
+		if (!domain_assembly) return;
+		const auto mono_image = domain_assembly->mono_image();
+		if (!mono_image) return;
+		const auto table_info = mono_image->get_table_info(3);
+		if (!table_info) return;
+
+		auto tbl = static_cast<mono_hash_table_t*>(reinterpret_cast<void*>(mono_image + 0x4D0));
+		int rows = table_info->get_rows();
+		int found = 0;
+
+		for (int i = 0; i < rows && found < count; i++)
+		{
+			const auto ptr = tbl->lookup<mono_class_t>(reinterpret_cast<void*>(0x02000000 | i + 1));
+			if (!ptr) continue;
+
+			auto name = ptr->name();
+			if (!ptr->namespace_name().empty())
+				name = ptr->namespace_name().append(".").append(ptr->name());
+
+			for (int j = 0; j < count; j++)
+			{
+				if (!results[j] && !strcmp(name.c_str(), class_names[j]))
+				{
+					results[j] = ptr;
+					found++;
+					break;
+				}
+			}
+		}
+	}
 }
