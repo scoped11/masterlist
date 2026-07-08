@@ -328,7 +328,7 @@ namespace Overlay
 		wc.style = CS_HREDRAW | CS_VREDRAW;
 		wc.lpfnWndProc = WndProc;
 		wc.hInstance = GetModuleHandle(NULL);
-		wc.lpszClassName = "CoopyyDMAOverlay";
+		wc.lpszClassName = "UnturnedDMAOverlay";
 		wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 		RegisterClassExA(&wc);
 
@@ -338,7 +338,7 @@ namespace Overlay
 
 		overlayWnd = CreateWindowExA(
 			exStyle,
-			"CoopyyDMAOverlay", "",
+			"UnturnedDMAOverlay", "",
 			WS_POPUP,
 			0, 0, screenW, screenH,
 			NULL, NULL, GetModuleHandle(NULL), NULL);
@@ -406,7 +406,7 @@ namespace Overlay
 		if (espFont) DeleteObject(espFont);
 		if (espFontSmall) DeleteObject(espFontSmall);
 		if (overlayWnd) DestroyWindow(overlayWnd);
-		UnregisterClassA("CoopyyDMAOverlay", GetModuleHandle(NULL));
+		UnregisterClassA("UnturnedDMAOverlay", GetModuleHandle(NULL));
 	}
 
 	inline void Shutdown()

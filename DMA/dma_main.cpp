@@ -13,8 +13,8 @@
 
 int main(int argc, char* argv[])
 {
-	SetConsoleTitleA("Coopyy DMA - RADAR PC");
-	printf("=== Coopyy DMA (Streamproof) ===\n");
+	SetConsoleTitleA("Unturned DMA - RADAR PC");
+	printf("=== Unturned DMA (Streamproof) ===\n");
 	printf("Run this on your RADAR PC (PC2)\n\n");
 
 	if (argc > 1 && strcmp(argv[1], "--offsets") == 0)
@@ -202,7 +202,7 @@ int main(int argc, char* argv[])
 			{
 				Log("[!] No HWND specified. Run with --hwnd <hex> to provide the game window handle.");
 				Log("    Find it on PC1: powershell -c \"(Get-Process Unturned).MainWindowHandle.ToString('X')\"");
-				Log("    Example: CoopyyDMA.exe --internal --hwnd 1A0B2C");
+				Log("    Example: UnturnedDMA.exe --internal --hwnd 1A0B2C");
 				goto idle;
 			}
 

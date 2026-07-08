@@ -1,6 +1,6 @@
-=== Coopyy DMA Build Instructions ===
+=== Unturned DMA Build Instructions ===
 
-This is the DMA (RADAR PC) version of Coopyy.
+This is the DMA (RADAR PC) version of Unturned.
 Runs on PC2 and reads PC1's game memory via the CaptainDMA 75T card.
 Inherently STREAMPROOF - overlay renders on RADAR PC only.
 
@@ -16,17 +16,17 @@ Inherently STREAMPROOF - overlay renders on RADAR PC only.
 3. Copy vmm.lib and leechcore.lib to DMA/libs/ (from MemProcFS SDK)
    OR use dynamic loading (LoadLibrary/GetProcAddress)
 
-== Build - CoopyyDMA.exe (runs on PC2 / RADAR PC) ==
+== Build - UnturnedDMA.exe (runs on PC2 / RADAR PC) ==
 
 Option A: Visual Studio
-  - Open coopyy_dll.sln, add a new Console Application project "CoopyyDMA"
+  - Open unturned_dll.sln, add a new Console Application project "UnturnedDMA"
   - Add all DMA/*.h and DMA/dma_main.cpp to the project
   - Include paths: DMA/, external/
   - Link: vmm.lib, leechcore.lib, ws2_32.lib
   - Build x64 Release
 
 Option B: Command Line (Developer Command Prompt)
-  cl /EHsc /O2 /std:c++17 /I"." /I".." dma_main.cpp /link vmm.lib leechcore.lib ws2_32.lib /OUT:CoopyyDMA.exe
+  cl /EHsc /O2 /std:c++17 /I"." /I".." dma_main.cpp /link vmm.lib leechcore.lib ws2_32.lib /OUT:UnturnedDMA.exe
 
 == Build - stealth_menu.exe (runs on PC1 / Main PC) ==
 
@@ -37,10 +37,10 @@ Option B: Command Line (Developer Command Prompt)
 == Usage ==
 
   On PC2 (RADAR):
-    CoopyyDMA.exe                         - Run cheat + web menu server (external ESP via esp_client)
-    CoopyyDMA.exe --internal --hwnd ABCD  - Internal ESP mode: injects rendering hook into game via DMA
-    CoopyyDMA.exe --dump                  - Dump all Unturned modules (PE dumper)
-    CoopyyDMA.exe --dump Game.exe         - Dump modules from a different game
+    UnturnedDMA.exe                         - Run cheat + web menu server (external ESP via esp_client)
+    UnturnedDMA.exe --internal --hwnd ABCD  - Internal ESP mode: injects rendering hook into game via DMA
+    UnturnedDMA.exe --dump                  - Dump all Unturned modules (PE dumper)
+    UnturnedDMA.exe --dump Game.exe         - Dump modules from a different game
 
   Internal ESP Mode (--internal):
     Instead of using esp_client.exe on PC1, this mode injects a D3D11 Present
@@ -85,21 +85,21 @@ Option B: Command Line (Developer Command Prompt)
 
 == Web Menu ==
 
-When CoopyyDMA.exe starts on PC2, it launches an HTTP server on port 7337.
+When UnturnedDMA.exe starts on PC2, it launches an HTTP server on port 7337.
 Access it from any browser on your LAN at http://<PC2_IP>:7337
 
 The web menu lets you toggle all 28 features and adjust sliders in real-time.
 Changes take effect immediately - no restart needed.
 
 NOTE: Windows Firewall on PC2 may block the port. Allow it through:
-  netsh advfirewall firewall add rule name="CoopyyDMA" dir=in action=allow protocol=TCP localport=7337
+  netsh advfirewall firewall add rule name="UnturnedDMA" dir=in action=allow protocol=TCP localport=7337
 
 == DMA Setup ==
 
 1. DMA card (CaptainDMA 75T) must be installed in PC1's PCIe slot
 2. USB Data cable connected from DMA card to THIS PC (PC2)
 3. Unturned must be running on PC1
-4. Run CoopyyDMA.exe on this PC
+4. Run UnturnedDMA.exe on this PC
 5. Run stealth_menu.exe on PC1 with PC2's IP address
 
 == Features (ALL 28 preserved) ==
@@ -141,6 +141,6 @@ Output goes to DMA_Dump_<PID>/ folder. Dumped files are ready for IDA Pro
 with section headers patched for raw format.
 
 Works with ANY game/process - just specify the process name:
-  CoopyyDMA.exe --dump cs2.exe
-  CoopyyDMA.exe --dump EscapeFromTarkov.exe
-  CoopyyDMA.exe --dump valorant.exe
+  UnturnedDMA.exe --dump cs2.exe
+  UnturnedDMA.exe --dump EscapeFromTarkov.exe
+  UnturnedDMA.exe --dump valorant.exe

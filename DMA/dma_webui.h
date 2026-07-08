@@ -6,7 +6,7 @@ inline const char* WEB_UI_HTML = R"RAWHTML(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CoopyyDMA</title>
+<title>UnturnedDMA</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -151,7 +151,7 @@ R"RAWHTML(
 <div class="container">
 
 <header>
-<h1>COOPYY DMA</h1>
+<h1>UNTURNED DMA</h1>
 <div class="status">
 <span class="dot" id="dot"></span>
 <span id="stxt">OFFLINE</span>

@@ -9,7 +9,7 @@ DWORD WINAPI MainThread(LPVOID lpParam)
 	FILE* f;
 	freopen_s(&f, "CONOUT$", "w", stdout);
 	freopen_s(&f, "CONIN$", "r", stdin);
-	SetConsoleTitleA("Coopyy DLL");
+	SetConsoleTitleA("Unturned DLL");
 
 	Log("Initializing...");
 	Memory::init();

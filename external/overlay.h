@@ -351,13 +351,13 @@ namespace Overlay
 		wc.style = CS_HREDRAW | CS_VREDRAW;
 		wc.lpfnWndProc = WndProc;
 		wc.hInstance = GetModuleHandle(NULL);
-		wc.lpszClassName = "CoopyyOverlay";
+		wc.lpszClassName = "UnturnedOverlay";
 		wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 		RegisterClassExA(&wc);
 
 		overlayWnd = CreateWindowExA(
 			WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
-			"CoopyyOverlay", "",
+			"UnturnedOverlay", "",
 			WS_POPUP,
 			0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
 			NULL, NULL, GetModuleHandle(NULL), NULL);
@@ -452,7 +452,7 @@ namespace Overlay
 		if (espFont) DeleteObject(espFont);
 		if (espFontSmall) DeleteObject(espFontSmall);
 		if (overlayWnd) DestroyWindow(overlayWnd);
-		UnregisterClassA("CoopyyOverlay", GetModuleHandle(NULL));
+		UnregisterClassA("UnturnedOverlay", GetModuleHandle(NULL));
 	}
 
 	inline void Shutdown()

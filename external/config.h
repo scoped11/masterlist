@@ -94,7 +94,7 @@ namespace Config
 	inline void PrintMenu()
 	{
 		printf("========================================\n");
-		printf("     COOPYY DLL - UNTURNED INTERNAL     \n");
+		printf("     UNTURNED DLL - INTERNAL\n");
 		printf("========================================\n");
 		printf(" [F1]   Aimbot:        %s  (hold RMB)\n", aimbot ? "ON " : "OFF");
 		printf(" [F2]   Silent Aim:    %s  (auto on LMB)\n", silentAim ? "ON " : "OFF");

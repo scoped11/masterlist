@@ -54,7 +54,7 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
 
 static HWND FindMenuWindow()
 {
-	FindWindowData data = { "CoopyyDMA", NULL };
+	FindWindowData data = { "UnturnedDMA", NULL };
 	EnumWindows(EnumWindowsProc, (LPARAM)&data);
 	return data.result;
 }
@@ -116,11 +116,11 @@ static void ApplyToAllChildren(HWND parent)
 
 int main(int argc, char* argv[])
 {
-	SetConsoleTitleA("CoopyyDMA Stealth Client");
+	SetConsoleTitleA("UnturnedDMA Stealth Client");
 
 	if (argc < 2)
 	{
-		printf("=== CoopyyDMA Stealth Menu Client ===\n\n");
+		printf("=== UnturnedDMA Stealth Menu Client ===\n\n");
 		printf("Usage: %s <RADAR_PC_IP> [port]\n\n", argv[0]);
 		printf("Example:\n");
 		printf("  %s 192.168.1.100\n", argv[0]);
@@ -137,7 +137,7 @@ int main(int argc, char* argv[])
 	int port = (argc > 2) ? atoi(argv[2]) : 7337;
 	sprintf_s(g_menuUrl, "http://%s:%d", host, port);
 
-	printf("=== CoopyyDMA Stealth Menu ===\n");
+	printf("=== UnturnedDMA Stealth Menu ===\n");
 	printf("Target: %s\n\n", g_menuUrl);
 
 	// Wait for DMA server to come online
@@ -174,7 +174,7 @@ int main(int argc, char* argv[])
 
 	if (!g_menuHwnd)
 	{
-		printf("[!] Could not find browser window with title 'CoopyyDMA'\n");
+		printf("[!] Could not find browser window with title 'UnturnedDMA'\n");
 		printf("[!] Make sure the page loaded. Retrying in background...\n");
 	}
 	else
