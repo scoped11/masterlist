@@ -11,8 +11,19 @@
 #include "../external/types/game.cpp"
 #include "../external/types/unity.cpp"
 
+static BOOL WINAPI ConsoleHandler(DWORD dwCtrlType)
+{
+	WebServer::Stop();
+	DMA::Close();
+	if (dwCtrlType == CTRL_CLOSE_EVENT || dwCtrlType == CTRL_LOGOFF_EVENT || dwCtrlType == CTRL_SHUTDOWN_EVENT)
+		Sleep(500);
+	ExitProcess(0);
+	return TRUE;
+}
+
 int main(int argc, char* argv[])
 {
+	SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 	SetConsoleTitleA("Unturned DMA - RADAR PC");
 	printf("=== Unturned DMA (Streamproof) ===\n");
 	printf("Run this on your RADAR PC (PC2)\n\n");
