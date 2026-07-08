@@ -189,6 +189,21 @@ inline uintptr_t safe_offset_recursive(mono_class_t* klass, const char* name)
 	return field ? field->offset() : 0;
 }
 
+inline uintptr_t cached_offset(const std::unordered_map<std::string, int>& cache, const char* name)
+{
+	auto it = cache.find(name);
+	return (it != cache.end()) ? (uintptr_t)it->second : 0;
+}
+
+inline uintptr_t cached_offset_fb(const std::unordered_map<std::string, int>& cache,
+	const char* name1, const char* name2, const char* name3 = nullptr)
+{
+	auto v = cached_offset(cache, name1);
+	if (!v) v = cached_offset(cache, name2);
+	if (!v && name3) v = cached_offset(cache, name3);
+	return v;
+}
+
 #ifndef DMA_BUILD
 inline std::wstring ReadManagedString(uintptr_t addr)
 {

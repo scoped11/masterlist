@@ -274,6 +274,40 @@ struct mono_class_t
 		}
 		return nullptr;
 	}
+
+	std::unordered_map<std::string, int> cache_all_fields()
+	{
+		std::unordered_map<std::string, int> map;
+		int nf = this->num_fields();
+		for (int i = 0; i < nf; i++)
+		{
+			const auto field = this->get_field(i);
+			if (!field) continue;
+			auto n = field->name();
+			if (!n.empty()) map[n] = field->offset();
+		}
+		return map;
+	}
+
+	std::unordered_map<std::string, int> cache_all_fields_recursive()
+	{
+		std::unordered_map<std::string, int> map;
+		auto klass = this;
+		for (int depth = 0; depth < 10 && klass && (uintptr_t)klass > 0x10000; depth++)
+		{
+			int nf = klass->num_fields();
+			for (int i = 0; i < nf; i++)
+			{
+				const auto field = klass->get_field(i);
+				if (!field) continue;
+				auto n = field->name();
+				if (!n.empty() && map.find(n) == map.end())
+					map[n] = field->offset();
+			}
+			klass = klass->parent();
+		}
+		return map;
+	}
 };
 
 struct mono_hash_table_t

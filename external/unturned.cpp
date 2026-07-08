@@ -191,234 +191,134 @@ namespace Offsets
 
 	void init()
 	{
-		_localPlayer = safe_offset(Classes::Player, "_localPlayer");
-		_player = safe_offset(Classes::Player, "_player");
-		Log("  _localPlayer offset: %s", _localPlayer ? "OK" : "MISSING");
-		Log("  _player offset: %s", _player ? "OK" : "MISSING");
+		Log("  Caching fields for all classes (one DMA pass per class)...");
 
-		channel = safe_offset(Classes::Player, "_channel");
-		if (!channel) channel = safe_offset(Classes::Player, "channel");
-		_equipment = safe_offset(Classes::Player, "_equipment");
-		if (!_equipment) _equipment = safe_offset(Classes::Player, "equipment");
+		auto cPlayer         = Classes::Player ? Classes::Player->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cProvider       = Classes::Provider ? Classes::Provider->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cSteamPlayer    = Classes::SteamPlayer ? Classes::SteamPlayer->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cSteamChannel   = Classes::SteamChannel ? Classes::SteamChannel->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cPlayerEquip    = Classes::PlayerEquipment ? Classes::PlayerEquipment->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cGunAsset       = Classes::ItemGunAsset ? Classes::ItemGunAsset->cache_all_fields_recursive() : std::unordered_map<std::string,int>{};
+		auto cWeaponAsset    = Classes::ItemWeaponAsset ? Classes::ItemWeaponAsset->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cPlayerLife     = Classes::PlayerLife ? Classes::PlayerLife->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cPlayerMove     = Classes::PlayerMovement ? Classes::PlayerMovement->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cPlayerLook     = Classes::PlayerLook ? Classes::PlayerLook->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cPlayerAnim     = Classes::PlayerAnimator ? Classes::PlayerAnimator->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cPlayerCloth    = Classes::PlayerClothing ? Classes::PlayerClothing->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cSteamPlayerID  = Classes::SteamPlayerID ? Classes::SteamPlayerID->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cVehicle        = Classes::InteractableVehicle ? Classes::InteractableVehicle->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cVehicleMgr     = Classes::VehicleManager ? Classes::VehicleManager->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cItemMgr        = Classes::ItemManager ? Classes::ItemManager->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cInterItem      = Classes::InteractableItem ? Classes::InteractableItem->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cItemAsset      = Classes::ItemAsset_Class ? Classes::ItemAsset_Class->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cZombieMgr      = Classes::ZombieManager ? Classes::ZombieManager->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cZombieRegion   = Classes::ZombieRegion ? Classes::ZombieRegion->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cZombie         = Classes::Zombie ? Classes::Zombie->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cUseableGun     = Classes::UseableGun ? Classes::UseableGun->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cLighting       = Classes::LevelLighting ? Classes::LevelLighting->cache_all_fields() : std::unordered_map<std::string,int>{};
+		auto cOptions        = Classes::OptionsSettings ? Classes::OptionsSettings->cache_all_fields() : std::unordered_map<std::string,int>{};
 
-		_isConnected = safe_offset(Classes::Provider, "_isConnected");
-		if (!_isConnected) _isConnected = safe_offset(Classes::Provider, "isConnected");
-		isLoadingUGC = safe_offset(Classes::Provider, "isLoadingUGC");
-		_clients = safe_offset(Classes::Provider, "_clients");
-		if (!_clients) _clients = safe_offset(Classes::Provider, "clients");
+		Log("  All fields cached. Resolving offsets...");
 
-		_isAdmin = safe_offset(Classes::SteamPlayer, "_isAdmin");
-		if (!_isAdmin) _isAdmin = safe_offset(Classes::SteamPlayer, "isAdmin");
-		_joined = safe_offset(Classes::SteamPlayer, "_joined");
-		_splayer = safe_offset(Classes::SteamPlayer, "_player");
-		if (!_splayer) _splayer = safe_offset(Classes::SteamPlayer, "player");
+		_localPlayer = cached_offset(cPlayer, "_localPlayer");
+		_player = cached_offset(cPlayer, "_player");
+		channel = cached_offset_fb(cPlayer, "_channel", "channel");
+		_equipment = cached_offset_fb(cPlayer, "_equipment", "equipment");
+		_life = cached_offset_fb(cPlayer, "_life", "life");
+		_movement = cached_offset_fb(cPlayer, "_movement", "movement");
+		_look = cached_offset_fb(cPlayer, "_look", "look");
+		_animator = cached_offset_fb(cPlayer, "_animator", "<animator>k__BackingField", "animator");
+		_clothing = cached_offset_fb(cPlayer, "_clothing", "<clothing>k__BackingField", "clothing");
 
-		owner = safe_offset(Classes::SteamChannel, "owner");
-		if (!owner) owner = safe_offset(Classes::SteamChannel, "_owner");
+		_isConnected = cached_offset_fb(cProvider, "_isConnected", "isConnected");
+		isLoadingUGC = cached_offset(cProvider, "isLoadingUGC");
+		_clients = cached_offset_fb(cProvider, "_clients", "clients");
 
-		_asset = safe_offset(Classes::PlayerEquipment, "_asset");
-		if (!_asset) _asset = safe_offset(Classes::PlayerEquipment, "asset");
+		_isAdmin = cached_offset_fb(cSteamPlayer, "_isAdmin", "isAdmin");
+		_joined = cached_offset(cSteamPlayer, "_joined");
+		_splayer = cached_offset_fb(cSteamPlayer, "_player", "player");
+		_playerID = cached_offset_fb(cSteamPlayer, "_playerID", "playerID");
 
-		recoilMin_x = safe_offset(Classes::ItemGunAsset, "recoilMin_x");
-		recoilMax_x = safe_offset(Classes::ItemGunAsset, "recoilMax_x");
-		recoilMin_y = safe_offset(Classes::ItemGunAsset, "recoilMin_y");
-		recoilMax_y = safe_offset(Classes::ItemGunAsset, "recoilMax_y");
-		baseSpreadAngleRadians = safe_offset(Classes::ItemGunAsset, "<baseSpreadAngleRadians>k__BackingField");
+		owner = cached_offset_fb(cSteamChannel, "owner", "_owner");
 
-		_life = safe_offset(Classes::Player, "_life");
-		if (!_life) _life = safe_offset(Classes::Player, "life");
-		_movement = safe_offset(Classes::Player, "_movement");
-		if (!_movement) _movement = safe_offset(Classes::Player, "movement");
-		_look = safe_offset(Classes::Player, "_look");
-		if (!_look) _look = safe_offset(Classes::Player, "look");
+		_asset = cached_offset_fb(cPlayerEquip, "_asset", "asset");
+		_useable = cached_offset_fb(cPlayerEquip, "_useable", "useable");
 
-		_health = safe_offset(Classes::PlayerLife, "_health");
-		if (!_health) _health = safe_offset(Classes::PlayerLife, "health");
-		_food = safe_offset(Classes::PlayerLife, "_food");
-		if (!_food) _food = safe_offset(Classes::PlayerLife, "food");
-		_water = safe_offset(Classes::PlayerLife, "_water");
-		if (!_water) _water = safe_offset(Classes::PlayerLife, "water");
-		_stamina = safe_offset(Classes::PlayerLife, "_stamina");
-		if (!_stamina) _stamina = safe_offset(Classes::PlayerLife, "stamina");
-		_virus = safe_offset(Classes::PlayerLife, "_virus");
-		if (!_virus) _virus = safe_offset(Classes::PlayerLife, "virus");
-		_isBleeding = safe_offset(Classes::PlayerLife, "_isBleeding");
-		if (!_isBleeding) _isBleeding = safe_offset(Classes::PlayerLife, "isBleeding");
-		_isBroken = safe_offset(Classes::PlayerLife, "_isBroken");
-		if (!_isBroken) _isBroken = safe_offset(Classes::PlayerLife, "isBroken");
+		recoilMin_x = cached_offset(cGunAsset, "recoilMin_x");
+		recoilMax_x = cached_offset(cGunAsset, "recoilMax_x");
+		recoilMin_y = cached_offset(cGunAsset, "recoilMin_y");
+		recoilMax_y = cached_offset(cGunAsset, "recoilMax_y");
+		baseSpreadAngleRadians = cached_offset(cGunAsset, "<baseSpreadAngleRadians>k__BackingField");
+		firerate = cached_offset_fb(cGunAsset, "firerate", "_firerate");
+		range = cached_offset_fb(cGunAsset, "range", "_range");
+		if (!range) range = cached_offset(cWeaponAsset, "range");
+		spreadHip = cached_offset_fb(cGunAsset, "spreadHip", "_spreadHip");
+		spreadAim = cached_offset_fb(cGunAsset, "spreadAim", "_spreadAim");
+		aimingMovementSpeedMultiplier = cached_offset_fb(cGunAsset, "aimingMovementSpeedMultiplier", "_aimingMovementSpeedMultiplier");
+		damageFalloffRange = cached_offset_fb(cGunAsset, "damageFalloffRange", "_damageFalloffRange");
 
-		pluginGravityMultiplier = safe_offset(Classes::PlayerMovement, "pluginGravityMultiplier");
-		if (!pluginGravityMultiplier) pluginGravityMultiplier = safe_offset(Classes::PlayerMovement, "_pluginGravityMultiplier");
-		pluginSpeedMultiplier = safe_offset(Classes::PlayerMovement, "pluginSpeedMultiplier");
-		if (!pluginSpeedMultiplier) pluginSpeedMultiplier = safe_offset(Classes::PlayerMovement, "_pluginSpeedMultiplier");
-		pluginJumpMultiplier = safe_offset(Classes::PlayerMovement, "pluginJumpMultiplier");
-		if (!pluginJumpMultiplier) pluginJumpMultiplier = safe_offset(Classes::PlayerMovement, "_pluginJumpMultiplier");
-		velocity = safe_offset(Classes::PlayerMovement, "velocity");
-		if (!velocity) velocity = safe_offset(Classes::PlayerMovement, "_velocity");
-		pendingLaunchVelocity = safe_offset(Classes::PlayerMovement, "pendingLaunchVelocity");
-		if (!pendingLaunchVelocity) pendingLaunchVelocity = safe_offset(Classes::PlayerMovement, "_pendingLaunchVelocity");
-		_vehicle = safe_offset(Classes::PlayerMovement, "_vehicle");
-		if (!_vehicle) _vehicle = safe_offset(Classes::PlayerMovement, "vehicle");
-		pluginFallDamageMultiplier = safe_offset(Classes::PlayerMovement, "pluginFallDamageMultiplier");
-		if (!pluginFallDamageMultiplier) pluginFallDamageMultiplier = safe_offset(Classes::PlayerMovement, "_pluginFallDamageMultiplier");
+		_health = cached_offset_fb(cPlayerLife, "_health", "health");
+		_food = cached_offset_fb(cPlayerLife, "_food", "food");
+		_water = cached_offset_fb(cPlayerLife, "_water", "water");
+		_stamina = cached_offset_fb(cPlayerLife, "_stamina", "stamina");
+		_virus = cached_offset_fb(cPlayerLife, "_virus", "virus");
+		_isBleeding = cached_offset_fb(cPlayerLife, "_isBleeding", "isBleeding");
+		_isBroken = cached_offset_fb(cPlayerLife, "_isBroken", "isBroken");
+		pl_stunDuration = cached_offset_fb(cPlayerLife, "_stunDuration", "stunDuration");
 
-		_isGrounded = safe_offset(Classes::PlayerMovement, "_isGrounded");
-		if (!_isGrounded) _isGrounded = safe_offset(Classes::PlayerMovement, "isGrounded");
-		totalSpeedMultiplier = safe_offset(Classes::PlayerMovement, "totalSpeedMultiplier");
-		if (!totalSpeedMultiplier) totalSpeedMultiplier = safe_offset(Classes::PlayerMovement, "_totalSpeedMultiplier");
-		if (!totalSpeedMultiplier) totalSpeedMultiplier = safe_offset(Classes::PlayerMovement, "<totalSpeedMultiplier>k__BackingField");
-		totalGravityMultiplier = safe_offset(Classes::PlayerMovement, "totalGravityMultiplier");
-		if (!totalGravityMultiplier) totalGravityMultiplier = safe_offset(Classes::PlayerMovement, "_totalGravityMultiplier");
-		if (!totalGravityMultiplier) totalGravityMultiplier = safe_offset(Classes::PlayerMovement, "<totalGravityMultiplier>k__BackingField");
-		Log("  _isGrounded: %s  totalSpeedMul: %s  totalGravMul: %s",
-			_isGrounded ? "OK" : "--", totalSpeedMultiplier ? "OK" : "--", totalGravityMultiplier ? "OK" : "--");
+		pluginGravityMultiplier = cached_offset_fb(cPlayerMove, "pluginGravityMultiplier", "_pluginGravityMultiplier");
+		pluginSpeedMultiplier = cached_offset_fb(cPlayerMove, "pluginSpeedMultiplier", "_pluginSpeedMultiplier");
+		pluginJumpMultiplier = cached_offset_fb(cPlayerMove, "pluginJumpMultiplier", "_pluginJumpMultiplier");
+		velocity = cached_offset_fb(cPlayerMove, "velocity", "_velocity");
+		pendingLaunchVelocity = cached_offset_fb(cPlayerMove, "pendingLaunchVelocity", "_pendingLaunchVelocity");
+		_vehicle = cached_offset_fb(cPlayerMove, "_vehicle", "vehicle");
+		pluginFallDamageMultiplier = cached_offset_fb(cPlayerMove, "pluginFallDamageMultiplier", "_pluginFallDamageMultiplier");
+		_isGrounded = cached_offset_fb(cPlayerMove, "_isGrounded", "isGrounded");
+		totalSpeedMultiplier = cached_offset_fb(cPlayerMove, "totalSpeedMultiplier", "_totalSpeedMultiplier");
+		if (!totalSpeedMultiplier) totalSpeedMultiplier = cached_offset(cPlayerMove, "<totalSpeedMultiplier>k__BackingField");
+		totalGravityMultiplier = cached_offset_fb(cPlayerMove, "totalGravityMultiplier", "_totalGravityMultiplier");
+		if (!totalGravityMultiplier) totalGravityMultiplier = cached_offset(cPlayerMove, "<totalGravityMultiplier>k__BackingField");
+		pm_controller = cached_offset_fb(cPlayerMove, "controller", "_controller");
+		pm_gps = cached_offset_fb(cPlayerMove, "gps", "_gps");
+		pm_compass = cached_offset_fb(cPlayerMove, "compass", "_compass");
 
-		pm_controller = safe_offset(Classes::PlayerMovement, "controller");
-		if (!pm_controller) pm_controller = safe_offset(Classes::PlayerMovement, "_controller");
-		pm_gps = safe_offset(Classes::PlayerMovement, "gps");
-		if (!pm_gps) pm_gps = safe_offset(Classes::PlayerMovement, "_gps");
-		pm_compass = safe_offset(Classes::PlayerMovement, "compass");
-		if (!pm_compass) pm_compass = safe_offset(Classes::PlayerMovement, "_compass");
-		pl_stunDuration = safe_offset(Classes::PlayerLife, "_stunDuration");
-		if (!pl_stunDuration) pl_stunDuration = safe_offset(Classes::PlayerLife, "stunDuration");
+		_yaw = cached_offset_fb(cPlayerLook, "_yaw", "yaw");
+		_pitch = cached_offset_fb(cPlayerLook, "_pitch", "pitch");
+		flinchLocalRotation = cached_offset_fb(cPlayerLook, "flinchLocalRotation", "_flinchLocalRotation");
+		smoothedExplosionLocalRotation = cached_offset_fb(cPlayerLook, "smoothedExplosionLocalRotation", "_smoothedExplosionLocalRotation");
 
-		_yaw = safe_offset(Classes::PlayerLook, "_yaw");
-		if (!_yaw) _yaw = safe_offset(Classes::PlayerLook, "yaw");
-		_pitch = safe_offset(Classes::PlayerLook, "_pitch");
-		if (!_pitch) _pitch = safe_offset(Classes::PlayerLook, "pitch");
+		scopeSway = cached_offset_fb(cPlayerAnim, "scopeSway", "_scopeSway");
+		fallingDamageMultiplier = cached_offset_fb(cPlayerCloth, "fallingDamageMultiplier", "_fallingDamageMultiplier");
+		_characterName = cached_offset_fb(cSteamPlayerID, "_characterName", "characterName");
 
-		flinchLocalRotation = safe_offset(Classes::PlayerLook, "flinchLocalRotation");
-		if (!flinchLocalRotation) flinchLocalRotation = safe_offset(Classes::PlayerLook, "_flinchLocalRotation");
-		smoothedExplosionLocalRotation = safe_offset(Classes::PlayerLook, "smoothedExplosionLocalRotation");
-		if (!smoothedExplosionLocalRotation) smoothedExplosionLocalRotation = safe_offset(Classes::PlayerLook, "_smoothedExplosionLocalRotation");
+		_speed = cached_offset_fb(cVehicle, "_speed", "speed");
+		_fuel = cached_offset_fb(cVehicle, "_fuel", "fuel");
+		_isExploded = cached_offset(cVehicle, "_isExploded");
+		_health_vehicle = cached_offset_fb(cVehicle, "_health", "health");
 
-		_animator = safe_offset(Classes::Player, "_animator");
-		if (!_animator) _animator = safe_offset(Classes::Player, "<animator>k__BackingField");
-		if (!_animator) _animator = safe_offset(Classes::Player, "animator");
-		scopeSway = safe_offset(Classes::PlayerAnimator, "scopeSway");
-		if (!scopeSway) scopeSway = safe_offset(Classes::PlayerAnimator, "_scopeSway");
+		vm_vehicles = cached_offset_fb(cVehicleMgr, "_vehicles", "vehicles");
+		im_clampedItems = cached_offset_fb(cItemMgr, "clampedItems", "_clampedItems");
+		ii_asset = cached_offset_fb(cInterItem, "asset", "_asset");
+		ia_itemName = cached_offset_fb(cItemAsset, "_itemName", "itemName");
 
-		_clothing = safe_offset(Classes::Player, "_clothing");
-		if (!_clothing) _clothing = safe_offset(Classes::Player, "<clothing>k__BackingField");
-		if (!_clothing) _clothing = safe_offset(Classes::Player, "clothing");
-		fallingDamageMultiplier = safe_offset(Classes::PlayerClothing, "fallingDamageMultiplier");
-		if (!fallingDamageMultiplier) fallingDamageMultiplier = safe_offset(Classes::PlayerClothing, "_fallingDamageMultiplier");
+		zm_tickingZombies = cached_offset_fb(cZombieMgr, "_tickingZombies", "tickingZombies");
+		zm_zombies = cached_offset_fb(cZombieMgr, "zombies", "_zombies");
+		if (!zm_zombies) zm_zombies = cached_offset(cZombieMgr, "<zombies>k__BackingField");
+		zm_regions = cached_offset_fb(cZombieMgr, "regions", "_regions");
+		if (!zm_regions) zm_regions = cached_offset(cZombieMgr, "<regions>k__BackingField");
+		zr_zombies = cached_offset_fb(cZombieRegion, "zombies", "_zombies");
+		if (!zr_zombies) zr_zombies = cached_offset(cZombieRegion, "<zombies>k__BackingField");
 
-		_playerID = safe_offset(Classes::SteamPlayer, "_playerID");
-		if (!_playerID) _playerID = safe_offset(Classes::SteamPlayer, "playerID");
-		_characterName = safe_offset(Classes::SteamPlayerID, "_characterName");
-		if (!_characterName) _characterName = safe_offset(Classes::SteamPlayerID, "characterName");
+		z_isDead = cached_offset_fb(cZombie, "isDead", "_isDead");
 
-		firerate = safe_offset(Classes::ItemGunAsset, "firerate");
-		if (!firerate) firerate = safe_offset(Classes::ItemGunAsset, "_firerate");
+		ug_isReloading = cached_offset_fb(cUseableGun, "isReloading", "_isReloading");
+		ug_reloadTime = cached_offset_fb(cUseableGun, "reloadTime", "_reloadTime");
+		ug_needsRechamber = cached_offset_fb(cUseableGun, "needsRechamber", "_needsRechamber");
 
-		range = safe_offset_recursive(Classes::ItemGunAsset, "range");
-		if (!range) range = safe_offset_recursive(Classes::ItemGunAsset, "_range");
-		if (!range) range = safe_offset(Classes::ItemWeaponAsset, "range");
-		Log("  range offset: 0x%X (recursive from ItemGunAsset)", (uint32_t)range);
+		ll_vision = cached_offset_fb(cLighting, "_vision", "vision");
+		os_cachedVerticalFOV = cached_offset_fb(cOptions, "_cachedVerticalFOV", "cachedVerticalFOV");
 
-		spreadHip = safe_offset(Classes::ItemGunAsset, "spreadHip");
-		if (!spreadHip) spreadHip = safe_offset(Classes::ItemGunAsset, "_spreadHip");
-		spreadAim = safe_offset(Classes::ItemGunAsset, "spreadAim");
-		if (!spreadAim) spreadAim = safe_offset(Classes::ItemGunAsset, "_spreadAim");
-		aimingMovementSpeedMultiplier = safe_offset(Classes::ItemGunAsset, "aimingMovementSpeedMultiplier");
-		if (!aimingMovementSpeedMultiplier) aimingMovementSpeedMultiplier = safe_offset(Classes::ItemGunAsset, "_aimingMovementSpeedMultiplier");
-		damageFalloffRange = safe_offset(Classes::ItemGunAsset, "damageFalloffRange");
-		if (!damageFalloffRange) damageFalloffRange = safe_offset(Classes::ItemGunAsset, "_damageFalloffRange");
-
-		_speed = safe_offset(Classes::InteractableVehicle, "_speed");
-		if (!_speed) _speed = safe_offset(Classes::InteractableVehicle, "speed");
-		_fuel = safe_offset(Classes::InteractableVehicle, "_fuel");
-		if (!_fuel) _fuel = safe_offset(Classes::InteractableVehicle, "fuel");
-		_isExploded = safe_offset(Classes::InteractableVehicle, "_isExploded");
-		_health_vehicle = safe_offset(Classes::InteractableVehicle, "_health");
-		if (!_health_vehicle) _health_vehicle = safe_offset(Classes::InteractableVehicle, "health");
-
-		vm_vehicles = safe_offset(Classes::VehicleManager, "_vehicles");
-		if (!vm_vehicles) vm_vehicles = safe_offset(Classes::VehicleManager, "vehicles");
-
-		im_clampedItems = safe_offset(Classes::ItemManager, "clampedItems");
-		if (!im_clampedItems) im_clampedItems = safe_offset(Classes::ItemManager, "_clampedItems");
-
-		ii_asset = safe_offset(Classes::InteractableItem, "asset");
-		if (!ii_asset) ii_asset = safe_offset(Classes::InteractableItem, "_asset");
-
-		ia_itemName = safe_offset(Classes::ItemAsset_Class, "_itemName");
-		if (!ia_itemName) ia_itemName = safe_offset(Classes::ItemAsset_Class, "itemName");
-
-		zm_tickingZombies = safe_offset(Classes::ZombieManager, "_tickingZombies");
-		if (!zm_tickingZombies) zm_tickingZombies = safe_offset(Classes::ZombieManager, "tickingZombies");
-
-		zm_zombies = safe_offset(Classes::ZombieManager, "zombies");
-		if (!zm_zombies) zm_zombies = safe_offset(Classes::ZombieManager, "_zombies");
-		if (!zm_zombies) zm_zombies = safe_offset(Classes::ZombieManager, "<zombies>k__BackingField");
-
-		zm_regions = safe_offset(Classes::ZombieManager, "regions");
-		if (!zm_regions) zm_regions = safe_offset(Classes::ZombieManager, "_regions");
-		if (!zm_regions) zm_regions = safe_offset(Classes::ZombieManager, "<regions>k__BackingField");
-
-		if (Classes::ZombieRegion)
-		{
-			zr_zombies = safe_offset(Classes::ZombieRegion, "zombies");
-			if (!zr_zombies) zr_zombies = safe_offset(Classes::ZombieRegion, "_zombies");
-			if (!zr_zombies) zr_zombies = safe_offset(Classes::ZombieRegion, "<zombies>k__BackingField");
-		}
-
-		Log("  zm_zombies: %s (0x%X)  zm_regions: %s (0x%X)  zr_zombies: %s (0x%X)",
-			zm_zombies ? "OK" : "--", (uint32_t)zm_zombies,
-			zm_regions ? "OK" : "--", (uint32_t)zm_regions,
-			zr_zombies ? "OK" : "--", (uint32_t)zr_zombies);
-
-		// Dump all ZombieManager fields for debugging
-		if (Classes::ZombieManager)
-		{
-			int nf = Classes::ZombieManager->num_fields();
-			Log("  ZombieManager has %d fields:", nf);
-			for (int i = 0; i < nf && i < 30; i++)
-			{
-				auto f = Classes::ZombieManager->get_field(i);
-				if (f) Log("    [%d] '%s' offset=0x%X", i, f->name().c_str(), f->offset());
-			}
-		}
-		if (Classes::ZombieRegion)
-		{
-			int nf = Classes::ZombieRegion->num_fields();
-			Log("  ZombieRegion has %d fields:", nf);
-			for (int i = 0; i < nf && i < 30; i++)
-			{
-				auto f = Classes::ZombieRegion->get_field(i);
-				if (f) Log("    [%d] '%s' offset=0x%X", i, f->name().c_str(), f->offset());
-			}
-		}
-
-		if (Classes::LevelLighting)
-		{
-			int nf = Classes::LevelLighting->num_fields();
-			Log("  LevelLighting has %d fields:", nf);
-			for (int i = 0; i < nf && i < 40; i++)
-			{
-				auto f = Classes::LevelLighting->get_field(i);
-				if (f) Log("    [%d] '%s' offset=0x%X", i, f->name().c_str(), f->offset());
-			}
-		}
-
-		z_isDead = safe_offset(Classes::Zombie, "isDead");
-		if (!z_isDead) z_isDead = safe_offset(Classes::Zombie, "_isDead");
-
-		_useable = safe_offset(Classes::PlayerEquipment, "_useable");
-		if (!_useable) _useable = safe_offset(Classes::PlayerEquipment, "useable");
-
-		ug_isReloading = safe_offset(Classes::UseableGun, "isReloading");
-		if (!ug_isReloading) ug_isReloading = safe_offset(Classes::UseableGun, "_isReloading");
-		ug_reloadTime = safe_offset(Classes::UseableGun, "reloadTime");
-		if (!ug_reloadTime) ug_reloadTime = safe_offset(Classes::UseableGun, "_reloadTime");
-		ug_needsRechamber = safe_offset(Classes::UseableGun, "needsRechamber");
-		if (!ug_needsRechamber) ug_needsRechamber = safe_offset(Classes::UseableGun, "_needsRechamber");
-
-		ll_vision = safe_offset(Classes::LevelLighting, "_vision");
-		if (!ll_vision) ll_vision = safe_offset(Classes::LevelLighting, "vision");
-
-		os_cachedVerticalFOV = safe_offset(Classes::OptionsSettings, "_cachedVerticalFOV");
-		if (!os_cachedVerticalFOV) os_cachedVerticalFOV = safe_offset(Classes::OptionsSettings, "cachedVerticalFOV");
+		Log("  _localPlayer: %s  _player: %s  range: 0x%X",
+			_localPlayer ? "OK" : "MISSING", _player ? "OK" : "MISSING", (uint32_t)range);
 	}
 }
