@@ -112,11 +112,11 @@ int main(int argc, char* argv[])
 		int retries = 0;
 		while (!DMA::FindProcess("Unturned.exe"))
 		{
-			if (GetAsyncKeyState(VK_END) & 1) goto cleanup;
+			if (GetAsyncKeyState(VK_INSERT) & 1) goto cleanup;
 			if (++retries > 120)
 			{
 				Log("[-] Gave up after 120 attempts. Is Unturned running on PC1?");
-				Log("    Web menu still running. Press END to exit.");
+				Log("    Web menu still running. Press INSERT to exit.");
 				goto idle;
 			}
 			Log("[*] Retrying in 3s... (%d/120)", retries);
@@ -130,7 +130,7 @@ int main(int argc, char* argv[])
 	if (!baseAddress)
 	{
 		Log("[-] Failed to find mono-2.0-bdwgc.dll");
-		Log("    Web menu still running. Press END to exit.");
+		Log("    Web menu still running. Press INSERT to exit.");
 		goto idle;
 	}
 
@@ -141,7 +141,7 @@ int main(int argc, char* argv[])
 	if (!GET_ROOT_DOMAIN_OFFSET)
 	{
 		Log("[-] CRITICAL: Could not find root domain offset!");
-		Log("    Web menu still running. Press END to exit.");
+		Log("    Web menu still running. Press INSERT to exit.");
 		goto idle;
 	}
 
@@ -177,17 +177,26 @@ int main(int argc, char* argv[])
 	Log("Waiting for server connection...");
 	while (!SDG::Provider::isConnected())
 	{
-		if (GetAsyncKeyState(VK_END) & 1) goto cleanup;
+		if (GetAsyncKeyState(VK_INSERT) & 1) goto cleanup;
 		Sleep(1000);
 		printf(".");
 	}
 	printf("\n");
 
 	{
-		auto localPlayer = Features::GetLocalPlayer();
+		SDG::Player* localPlayer = nullptr;
+		for (int lp_try = 0; lp_try < 30 && !localPlayer; lp_try++)
+		{
+			localPlayer = Features::GetLocalPlayer();
+			if (!localPlayer)
+			{
+				if (lp_try == 0) Log("[*] Waiting for local player to spawn...");
+				Sleep(1000);
+			}
+		}
 		if (!localPlayer)
 		{
-			Log("[-] Couldn't find local player");
+			Log("[-] Couldn't find local player after 30s");
 			goto idle;
 		}
 
@@ -219,7 +228,7 @@ int main(int argc, char* argv[])
 
 			while (true)
 			{
-				if (GetAsyncKeyState(VK_END) & 1)
+				if (GetAsyncKeyState(VK_INSERT) & 1)
 					break;
 
 				if (!SDG::Provider::isConnected())
@@ -247,7 +256,7 @@ int main(int argc, char* argv[])
 
 		while (true)
 		{
-			if (GetAsyncKeyState(VK_END) & 1)
+			if (GetAsyncKeyState(VK_INSERT) & 1)
 				break;
 
 			if (!SDG::Provider::isConnected())
@@ -273,8 +282,8 @@ int main(int argc, char* argv[])
 	goto cleanup;
 
 idle:
-	Log("Press END to exit. Web menu remains active.");
-	while (!(GetAsyncKeyState(VK_END) & 1))
+	Log("Press INSERT to exit. Web menu remains active.");
+	while (!(GetAsyncKeyState(VK_INSERT) & 1))
 		Sleep(200);
 
 cleanup:
