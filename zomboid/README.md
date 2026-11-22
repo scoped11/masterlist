@@ -1,4 +1,6 @@
-# Project Zomboid — Live Player Viewer (legitimate / server-admin)
+# Project Zomboid — Live Player Viewer (server-mod path)
+
+> **Primary (external / user choice):** [`../external/pz/README.md`](../external/pz/README.md) — `pz_viewer.exe` with runtime modes and `localhost:8880` web radar.
 
 A **small stack for servers you control** (dedicated host, listen server, or co-op): a **server-side Lua mod** publishes connected player positions to disk, and a **Windows viewer** serves a browser radar on **`http://localhost:8880`** (same port convention as [`research/LINKS.md`](../research/LINKS.md) shared radar endpoint).
 
