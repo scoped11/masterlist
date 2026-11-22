@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "source": "fixture",
+  "updatedMs": 1732233600000,
+  "players": [
+    { "username": "Alice", "x": 10800.5, "y": 9400.25, "z": 0.0 },
+    { "username": "Bob", "x": 10950.0, "y": 9550.75, "z": 1.0 },
+    { "username": "Carol", "x": 10720.0, "y": 9280.0, "z": 0.0 }
+  ]
+}
