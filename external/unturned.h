@@ -74,6 +74,7 @@ namespace Classes
 	extern mono_class_t* UseableGun;
 	extern mono_class_t* ItemAsset_Class;
 	extern mono_class_t* OptionsSettings;
+	extern mono_class_t* PlayerInventory;
 
 	void init();
 }
@@ -123,6 +124,8 @@ namespace Offsets
 	extern uintptr_t _isGrounded;
 	extern uintptr_t totalSpeedMultiplier;
 	extern uintptr_t totalGravityMultiplier;
+
+	extern uintptr_t _inventory;
 
 	extern uintptr_t _look;
 	extern uintptr_t _yaw;
