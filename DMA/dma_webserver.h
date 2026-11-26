@@ -1,6 +1,8 @@
 #pragma once
 #include "dma_config.h"
 #include "dma_webui.h"
+#include "dma_spawn_items.h"
+#include "dma_spawn.h"
 #include "log.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -50,6 +52,11 @@ namespace WebServer
 		{"chams",         &Config::chams},
 		{"streamProof",   &Config::streamProof},
 		{"lootTeleport",  &Config::lootTeleport},
+		{"lootSilent",    &Config::lootSilent},
+		{"lootStaggered", &Config::lootStaggered},
+		{"lootFilterGuns", &Config::lootFilterGuns},
+		{"lootFilterMeds", &Config::lootFilterMeds},
+		{"lootFilterGear", &Config::lootFilterGear},
 		{"espBoxes",      &Config::espBoxes},
 		{"espNames",      &Config::espNames},
 		{"espDistance",    &Config::espDistance},
@@ -72,6 +79,8 @@ namespace WebServer
 		{"meleeRange",      &Config::meleeRange,       1.0f, 50.0f},
 		{"lootRadius",      &Config::lootRadius,       5.0f, 200.0f},
 		{"noclipSpeed",     &Config::noclipSpeed,      1.0f, 15.0f},
+		{"lootDelay",       &Config::lootDelay,        1.0f, 30.0f},
+		{"vehicleFlySpeed", &Config::vehicleFlySpeed,  1.0f, 10.0f},
 	};
 
 	inline void SendResponse(SOCKET s, int code, const char* contentType, const char* body, int bodyLen, bool keepAlive = true)
@@ -166,6 +175,60 @@ namespace WebServer
 			if (c >= 32 && c < 127) out += c;
 		}
 		return out;
+	}
+
+	inline void HandleSpawnItemsGet(SOCKET s)
+	{
+		SendJSON(s, SPAWN_ITEMS_JSON);
+	}
+
+	inline void HandleSpawnPost(SOCKET s, const char* rest)
+	{
+		unsigned id = 0;
+		unsigned qty = 1;
+		if (!rest || !rest[0])
+		{
+			SendResponse(s, 400, "application/json", "{\"error\":\"missing item id\"}", 31);
+			return;
+		}
+		const char* slash = strchr(rest, '/');
+		const char* qmark = strchr(rest, '?');
+		if (slash)
+		{
+			char idBuf[16] = {};
+			int len = (int)(slash - rest);
+			if (len > 15) len = 15;
+			memcpy(idBuf, rest, len);
+			id = (unsigned)atoi(idBuf);
+			qty = (unsigned)atoi(slash + 1);
+		}
+		else if (qmark)
+		{
+			char idBuf[16] = {};
+			int len = (int)(qmark - rest);
+			if (len > 15) len = 15;
+			memcpy(idBuf, rest, len);
+			id = (unsigned)atoi(idBuf);
+			const char* q = strstr(qmark, "qty=");
+			if (q) qty = (unsigned)atoi(q + 4);
+		}
+		else
+		{
+			id = (unsigned)atoi(rest);
+		}
+
+		if (id == 0 || id > 65535)
+		{
+			SendResponse(s, 400, "application/json", "{\"error\":\"invalid item id\"}", 29);
+			return;
+		}
+		if (qty < 1) qty = 1;
+		if (qty > 100) qty = 100;
+
+		SpawnItems::Enqueue((uint16_t)id, (uint8_t)qty);
+		char resp[96];
+		sprintf_s(resp, "{\"queued\":true,\"id\":%u,\"qty\":%u}", id, qty);
+		SendJSON(s, resp);
 	}
 
 	inline void HandleGameData(SOCKET s)
@@ -264,6 +327,14 @@ namespace WebServer
 			else if (_stricmp(method, "GET") == 0 && strcmp(path, "/api/gamedata") == 0)
 			{
 				HandleGameData(client);
+			}
+			else if (_stricmp(method, "GET") == 0 && strcmp(path, "/api/spawn/items") == 0)
+			{
+				HandleSpawnItemsGet(client);
+			}
+			else if (_stricmp(method, "POST") == 0 && strncmp(path, "/api/spawn/", 11) == 0)
+			{
+				HandleSpawnPost(client, path + 11);
 			}
 			else if (_stricmp(method, "POST") == 0 && strncmp(path, "/api/toggle/", 12) == 0)
 			{

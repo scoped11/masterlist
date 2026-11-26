@@ -29,6 +29,7 @@ namespace Classes
 	mono_class_t* UseableGun;
 	mono_class_t* ItemAsset_Class;
 	mono_class_t* OptionsSettings;
+	mono_class_t* PlayerInventory;
 
 	void init()
 	{
@@ -59,9 +60,10 @@ namespace Classes
 			"SDG.Unturned.LevelLighting",
 			"SDG.Unturned.UseableGun",
 			"SDG.Unturned.OptionsSettings",
+			"SDG.Unturned.PlayerInventory",
 		};
-		mono_class_t* results[24] = {};
-		mono::find_classes_batch("Assembly-CSharp", names, results, 24);
+		mono_class_t* results[25] = {};
+		mono::find_classes_batch("Assembly-CSharp", names, results, 25);
 
 		Provider           = results[0];
 		Player             = results[1];
@@ -87,11 +89,12 @@ namespace Classes
 		LevelLighting      = results[21];
 		UseableGun         = results[22];
 		OptionsSettings    = results[23];
+		PlayerInventory    = results[24];
 		ItemAsset_Class    = results[5];
 
 		int found = 0;
-		for (int i = 0; i < 24; i++) if (results[i]) found++;
-		Log("  Resolved %d/24 classes.", found);
+		for (int i = 0; i < 25; i++) if (results[i]) found++;
+		Log("  Resolved %d/25 classes.", found);
 	}
 }
 
@@ -129,6 +132,7 @@ namespace Offsets
 	uintptr_t _isBleeding;
 	uintptr_t _isBroken;
 
+	uintptr_t _inventory;
 	uintptr_t _movement;
 	uintptr_t pluginGravityMultiplier;
 	uintptr_t pluginSpeedMultiplier;
@@ -227,6 +231,8 @@ namespace Offsets
 
 		_life = safe_offset(Classes::Player, "_life");
 		if (!_life) _life = safe_offset(Classes::Player, "life");
+		_inventory = safe_offset(Classes::Player, "_inventory");
+		if (!_inventory) _inventory = safe_offset(Classes::Player, "inventory");
 		_movement = safe_offset(Classes::Player, "_movement");
 		if (!_movement) _movement = safe_offset(Classes::Player, "movement");
 		_look = safe_offset(Classes::Player, "_look");

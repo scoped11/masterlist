@@ -139,6 +139,24 @@ background:rgba(0,10,0,0.4);margin-bottom:3px;border:1px solid transparent;font-
 .pl-empty{color:var(--text-dim);font-size:11px;padding:12px;text-align:center}
 .entity-counts{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
 .ecount{font-size:11px;padding:4px 10px;border-radius:4px;background:rgba(0,10,0,0.5);border:1px solid rgba(0,255,65,0.08)}
+.section.spawn{border-color:rgba(100,220,255,0.2)}
+.section.spawn h2{color:#66ddff}
+.spawn-search{width:100%;padding:10px 12px;margin-bottom:10px;border-radius:6px;border:1px solid rgba(100,220,255,0.15);
+background:rgba(0,15,20,0.6);color:var(--text-bright);font-family:inherit;font-size:13px;outline:none}
+.spawn-search:focus{border-color:rgba(100,220,255,0.4)}
+.spawn-list{max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+.spawn-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;
+background:rgba(0,12,18,0.55);border:1px solid rgba(100,220,255,0.06)}
+.spawn-row:hover{border-color:rgba(100,220,255,0.2)}
+.spawn-name{flex:1;font-size:12px;color:var(--text)}
+.spawn-id{font-size:10px;color:var(--text-dim);min-width:42px}
+.spawn-qty{width:48px;padding:4px 6px;border-radius:4px;border:1px solid rgba(100,220,255,0.12);
+background:rgba(0,8,12,0.8);color:var(--accent);font-size:11px;text-align:center}
+.spawn-btn{padding:6px 10px;border-radius:4px;border:1px solid rgba(100,220,255,0.25);
+background:rgba(0,40,55,0.6);color:#66ddff;font-size:11px;cursor:pointer;font-family:inherit}
+.spawn-btn:hover{background:rgba(0,60,80,0.8)}
+.spawn-note{font-size:11px;color:var(--text-dim);line-height:1.6;margin-top:10px;padding:8px 10px;
+background:rgba(100,220,255,0.04);border-radius:4px;border:1px solid rgba(100,220,255,0.08)}
 </style>
 </head>
 )RAWHTML"
@@ -271,6 +289,13 @@ R"RAWHTML(
 </div>
 </div>
 
+<div class="section spawn">
+<h2>// Item Spawn</h2>
+<input type="text" class="spawn-search" id="spawnSearch" placeholder="Search items by name or id..." autocomplete="off">
+<div class="spawn-list" id="spawnList"><div class="pl-empty">Loading item list...</div></div>
+<div class="spawn-note"><b style="color:#66ddff">Admin Mode</b> should be ON for multiplayer servers that validate inventory. Spawns queue on the DMA loop — first empty <b>ItemJar</b> slot is written via DMA (best-effort; rebuild after game updates).</div>
+</div>
+
 <div class="section player">
 <h2>// Player</h2>
 <div class="grid">
@@ -387,6 +412,25 @@ if(gd.i&&gd.i.length)counts+='<span class="ecount" style="color:#ffaa00">Items: 
 ec.innerHTML=counts;
 }
 setInterval(updPL,200);
+
+let spawnItems=[];
+async function loadSpawnItems(){
+try{const r=await fetch(O+'/api/spawn/items');if(!r.ok)throw 0;spawnItems=await r.json();renderSpawnList('')}catch(e){
+document.getElementById('spawnList').innerHTML='<div class="pl-empty">Spawn API offline</div>'}}
+function renderSpawnList(q){
+const el=document.getElementById('spawnList');
+const needle=(q||'').trim().toLowerCase();
+let items=spawnItems;
+if(needle)items=spawnItems.filter(it=>it.name.toLowerCase().includes(needle)||String(it.id).includes(needle));
+if(!items.length){el.innerHTML='<div class="pl-empty">No matches</div>';return}
+let h='';
+items.forEach(it=>{h+='<div class="spawn-row"><span class="spawn-id">#'+it.id+'</span><span class="spawn-name">'+it.name+'</span><input class="spawn-qty" type="number" min="1" max="100" value="1" id="sq_'+it.id+'"><button class="spawn-btn" data-id="'+it.id+'">Spawn</button></div>'});
+el.innerHTML=h;
+el.querySelectorAll('.spawn-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+const id=btn.dataset.id;const qin=document.getElementById('sq_'+id);const qty=qin?qin.value:1;
+try{const r=await fetch(O+'/api/spawn/'+id+'/'+qty,{method:'POST'});if(r.ok){const d=await r.json();toast('Queued '+d.id+' x'+d.qty)}else toast('Spawn failed')}catch(e){toast('Spawn error')}}))}
+document.getElementById('spawnSearch').addEventListener('input',e=>renderSpawnList(e.target.value));
+loadSpawnItems();
 </script>
 </body>
 </html>

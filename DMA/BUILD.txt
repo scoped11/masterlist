@@ -37,6 +37,9 @@ Option B: Command Line (Developer Command Prompt)
 == Usage ==
 
   On PC2 (RADAR):
+    UnturnedDMA.exe listens on port 9222 for the web menu (dma_main.cpp);
+    stealth_menu.exe on PC1 defaults to port 7337 — pass the radar PC IP and 9222 if needed.
+
     UnturnedDMA.exe                         - Run cheat + web menu server (external ESP via esp_client)
     UnturnedDMA.exe --internal --hwnd ABCD  - Internal ESP mode: injects rendering hook into game via DMA
     UnturnedDMA.exe --dump                  - Dump all Unturned modules (PE dumper)

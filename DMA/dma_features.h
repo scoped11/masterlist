@@ -3,6 +3,7 @@
 #include "dma_overlay.h"
 #include "../external/game_math.h"
 #include "../external/types/game.h"
+#include "dma_spawn.h"
 
 namespace Features
 {
@@ -1321,5 +1322,6 @@ namespace Features
 		UpdateTriggerbot(localPlayer);
 		UpdateChams(localPlayer);
 		UpdateLootTeleport(localPlayer);
+		SpawnItems::Update(localPlayer);
 	}
 }
